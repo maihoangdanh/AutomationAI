@@ -1,219 +1,470 @@
 # CONTEXT — AI Studio: Video Script Architect
-> File này dành cho Claude session mới / worktree khác đọc để hiểu project đang ở đâu.
-> Cập nhật lần cuối: 2026-06-06
+> Đọc file này trước khi làm bất cứ điều gì trong project.
+> Claude session mới / worktree khác: đọc từ đầu đến cuối, khoảng 5 phút.
+> **Cập nhật lần cuối:** 2026-06-06 — sau khi push GitHub lần đầu.
 
 ---
 
-## Tóm tắt nhanh
+## 1. Project là gì và đang ở đâu
 
-**Project là gì:** Web app luxury dark gold (FastAPI backend + vanilla JS frontend) giúp người dùng nhập ý tưởng → Claude viết kịch bản video ngắn → FAL.ai generate ảnh storyboard → Google Veo 3 generate video clip. Chạy local tại `http://localhost:3456`.
-
-**Trạng thái hiện tại:** ✅ Đang hoạt động. Backend real AI. Frontend kết nối đầy đủ. State persist localStorage.
+**Mục tiêu:** Web app chạy local giúp người dùng nhập ý tưởng → AI tự động tạo kịch bản video ngắn + ảnh storyboard + video clip, dùng cho TikTok / Reels / YouTube Shorts.
 
 **Repo:** https://github.com/maihoangdanh/AutomationAI
 
+**Chạy local tại:** `http://localhost:3456`
+
+**Cách chạy:**
+```bash
+cd "D:\Quan Lieu\Automation AI"
+# Kill processes cũ (Windows):
+wmic process where "name='python.exe'" delete
+# Chạy server:
+python server.py
+```
+
+**Trạng thái tổng quan:**
+- ✅ Backend FastAPI chạy được, tất cả 5 endpoints hoạt động
+- ✅ Frontend luxury dark gold UI kết nối real backend
+- ✅ Claude viết kịch bản thật qua CLI OAuth (không cần API key)
+- ⚠️ FAL.ai: code đúng, cần nạp balance tại fal.ai/dashboard/billing
+- ⚠️ Google Veo 3: code đúng, quota free hết hôm nay (reset hàng ngày), hoặc bật GCP billing
+- ✅ State persist localStorage — F5 không mất data
+
 ---
 
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Backend | Python 3.11, FastAPI, Uvicorn |
-| Script AI | Claude Code CLI (`claude -p`) — OAuth session, không cần API key |
-| Image AI | FAL.ai `fal-ai/flux/dev` |
-| Video AI | Google Veo 3 `veo-3.0-generate-001` qua `google-genai` SDK |
-| Frontend | Vanilla HTML/CSS/JS, localStorage persist |
-| Port | 3456 |
-
----
-
-## Cấu trúc file quan trọng
+## 2. Cấu trúc file — mỗi file làm gì
 
 ```
 AutomationAI/
-├── server.py              # Entry point — FastAPI app, mounts, routers
-├── models.py              # Tất cả Pydantic schemas
-├── index.html             # Toàn bộ frontend (1 file duy nhất, ~1900 dòng)
+├── server.py              ← Entry point. Chạy: python server.py
+├── models.py              ← Tất cả Pydantic schemas cho request/response
+├── index.html             ← Toàn bộ frontend (~1950 dòng, 1 file duy nhất)
+├── requirements.txt       ← pip install -r requirements.txt
+├── .env                   ← API keys (gitignored, phải tạo tay)
+├── .env.example           ← Template .env
+├── pytest.ini             ← asyncio_mode = auto
 ├── api/
-│   ├── script.py          # POST /api/script — gọi claude CLI subprocess
-│   ├── images.py          # POST /api/image  — fal_client.run_async
-│   ├── batch.py           # POST /api/batch  — asyncio.Semaphore(5) + gather
-│   ├── video.py           # POST /api/video  — genai.Client.models.generate_videos()
-│   └── characters.py      # POST /api/character/generate-refs — 6 góc FAL.ai
-├── .env                   # GOOGLE_API_KEY, FAL_KEY (gitignored)
-├── .env.example           # Template
-├── output/                # Generated files (gitignored)
-│   ├── videos/            # .mp4 từ Veo 3
-│   └── characters/        # Reference sheet images
+│   ├── __init__.py        ← Rỗng
+│   ├── script.py          ← POST /api/script
+│   ├── images.py          ← POST /api/image
+│   ├── batch.py           ← POST /api/batch
+│   ├── video.py           ← POST /api/video
+│   └── characters.py      ← POST /api/character/generate-refs
+├── tests/
+│   ├── test_script.py
+│   ├── test_images.py
+│   ├── test_batch.py
+│   └── test_video.py
+├── output/                ← Generated files (gitignored)
+│   ├── videos/            ← .mp4 từ Veo 3
+│   └── characters/        ← Reference sheet images
+├── README.md              ← Hướng dẫn setup cho người dùng mới
+├── CONTEXT.md             ← File này
 └── docs/superpowers/plans/
-    └── 2026-06-06-real-ai-backend.md  # Implementation plan gốc
+    └── 2026-06-06-real-ai-backend.md
 ```
 
 ---
 
-## Lịch sử làm việc (theo thứ tự)
+## 3. File server.py — đọc kỹ vì có nhiều quirks
 
-### Giai đoạn 1: Xây harness + UI shell
-- Tạo `.claude/agents/` (script-writer, character-manager, storyboard-architect, content-optimizer)
-- Tạo `.claude/skills/` (video-script-orchestrator, scene-breakdown, character-profile, storyboard-visual)
-- Build `index.html` — luxury dark gold UI với 7 khu vực: Ý tưởng, Tỷ lệ, Thời lượng, Phong cách, Nhân vật, Timeline, Storyboard
-- Lúc này chỉ là mock JS (generate fake scenes từ template)
-
-### Giai đoạn 2: Backend real AI (8 tasks, subagent-driven)
-- **Task 1:** FastAPI bootstrap — server.py, models.py, requirements.txt
-- **Task 2:** Claude CLI proxy — `asyncio.create_subprocess_exec("claude", "-p", ...)` qua stdin để tránh Windows encoding bug
-- **Task 3:** FAL.ai Flux — `fal_client.run_async("fal-ai/flux/dev", ...)`, save ảnh local
-- **Task 4:** Batch parallel — `asyncio.Semaphore(MAX_BATCH_PARALLEL)` + `asyncio.gather`
-- **Task 5:** Connect frontend — thay mock `generateScript()` bằng fetch `/api/script` + `/api/batch`
-- **Task 6:** SETUP.md + .gitignore
-- **Task 7:** Google Veo 3 — `client.models.generate_videos()`, polling `operation.done`
-- **Task 8:** Video trong UI — `state.videoMap`, `generateVideo()`, `<video>` autoplay
-
-### Giai đoạn 3: Bugs & fixes
-- **Bug 1:** `405 Method Not Allowed` — do `app.mount("/", StaticFiles)` bắt tất cả POST. Fix: đổi thành `@app.get("/{full_path:path}")` route
-- **Bug 2:** 3 processes tranh nhau port 3456 — server cũ không bị kill. Fix: `wmic process where "name='python.exe'" delete`
-- **Bug 3:** `uvicorn.run("server:app", ...)` string mode reload → routes không register. Fix: `uvicorn.run(app, ...)` truyền object trực tiếp
-- **Bug 4:** Routes empty trong openapi.json khi chạy qua preview tool — do cwd sai. Fix: `os.chdir(Path(__file__).parent)`
-- **Bug 5:** Google Veo 3 SDK bugs:
-  - Method tên là `generate_videos` (plural, không phải `generate_video`)
-  - `enhance_prompt=True` không hỗ trợ → remove
-  - Model name là `veo-3.0-generate-001` (không phải `veo-3.0-generate-preview`)
-- **Bug 6:** `duration_seconds` gây lỗi 400 → remove khỏi config
-- **Bug 7:** FAL.ai balance hết → cần nạp tại fal.ai/dashboard/billing
-
-### Giai đoạn 4: Features thêm
-- **Character Edit button** — nút ✎ mở form pre-filled, edit mode vs add mode
-- **Character Reference Sheet** — `api/characters.py`, 6 góc song song (Front, 3/4 L, 3/4 R, Side, Smile, Dynamic), ảnh đầu làm avatar
-- **localStorage persist** — `saveState()`/`loadState()`, state survive F5
-  - Bug: infinite recursion khi patch `updateStatus()` bằng function declaration. Fix: gọi `saveState()` trực tiếp trong hàm gốc
-  - Bug: `openAddCharacter()` crash do DOM query sai. Fix: remove đoạn query broken
-- **Push GitHub** — https://github.com/maihoangdanh/AutomationAI
-
----
-
-## State hiện tại của từng tính năng
-
-| Feature | Status | Ghi chú |
-|---------|--------|---------|
-| Script generation (Claude) | ✅ Hoạt động | Dùng OAuth CLI, không cần API key |
-| Image generation (FAL.ai) | ⚠️ Cần nạp tiền | Code đúng, chỉ thiếu balance |
-| Batch generation | ✅ Code đúng | Phụ thuộc FAL balance |
-| Video generation (Veo 3) | ⚠️ Quota hết hôm nay | Reset daily, hoặc bật billing |
-| Character reference sheet | ✅ Code đúng | Phụ thuộc FAL balance |
-| Character edit | ✅ Hoạt động | |
-| localStorage persist | ✅ Hoạt động | Idea, scenes, chars, ratio, style, duration |
-| Export JSON/MD/Prompts | ✅ Hoạt động | |
-| GitHub sync | ✅ Đã push | maihoangdanh/AutomationAI |
-
----
-
-## Cách chạy server
-
-```bash
-# Kill processes cũ nếu cần
-wmic process where "name='python.exe'" delete
-
-# Chạy
-cd "D:\Quan Lieu\Automation AI"
-python server.py
-# → http://localhost:3456
-```
-
-**Quan trọng:** Server dùng `uvicorn.run(app, ...)` (truyền object, không phải string) và `os.chdir(Path(__file__).parent)` để fix Windows cwd issue.
-
----
-
-## Các điểm kỹ thuật quan trọng cần biết
-
-### Claude CLI subprocess (Windows)
 ```python
-# Phải dùng stdin thay vì argument vì Vietnamese chars → UnicodeEncodeError cp1252
-proc = await asyncio.create_subprocess_exec(
-    "cmd", "/c", "claude", "-p", "-",  # "-" = đọc từ stdin
-    stdin=asyncio.subprocess.PIPE,
-    stdout=asyncio.subprocess.PIPE,
-    stderr=asyncio.subprocess.PIPE
-)
-stdout, stderr = await asyncio.wait_for(
-    proc.communicate(input=prompt.encode('utf-8')), timeout=90
-)
+# QUAN TRỌNG: 3 dòng đầu fix Windows cwd bug
+_root = Path(__file__).parent.resolve()
+os.chdir(_root)                          # phải chạy từ đúng thư mục
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))       # để import api.* được
+
+load_dotenv(_root / ".env")              # load .env từ đúng path
+
+# Thứ tự mount PHẢI như này (specific trước, general sau):
+app.mount("/output/videos", ...)        # 1. videos
+app.mount("/output/characters", ...)   # 2. characters
+app.mount("/output", ...)              # 3. output root
+# KHÔNG dùng app.mount("/", StaticFiles) → bắt tất cả POST → 405 Method Not Allowed
+
+@app.get("/")                           # serve index.html
+@app.get("/{full_path:path}")           # catch-all cho GET
+
+uvicorn.run(app, ...)                   # truyền object, KHÔNG dùng string "server:app"
+                                        # string mode → subprocess reload → routes không register
 ```
 
-### FAL.ai aspect ratio mapping
-```python
-RATIO_MAP = {
-    "9:16": "portrait_16_9",
-    "1:1": "square",
-    "16:9": "landscape_16_9"
+---
+
+## 4. API Endpoints chi tiết
+
+### POST `/api/script` — Viết kịch bản
+
+**File:** `api/script.py`
+
+**Request:**
+```json
+{
+  "idea": "Quảng cáo kem trị mụn Trioderma, target gen Z 17-25",
+  "aspect_ratio": "9:16",
+  "duration": 30,
+  "style": "viral tiktok",
+  "characters": [
+    {"name": "Linh", "desc": "nữ 18t tóc dài", "prompt": "Vietnamese girl, 18yo, oval face..."}
+  ]
 }
 ```
 
-### Google Veo 3 correct API
-```python
-operation = client.models.generate_videos(   # plural!
-    model="veo-3.0-generate-001",             # stable Veo 3
-    prompt=req.prompt,
-    config=types.GenerateVideosConfig(        # GenerateVideosConfig (plural)
-        aspect_ratio=aspect,
-        number_of_videos=1,
-        # KHÔNG có: enhance_prompt, duration_seconds
-    )
-)
+**Response:**
+```json
+{
+  "concept": "...",
+  "aspect_ratio": "9:16",
+  "total_duration": 30,
+  "style": "viral tiktok",
+  "scenes": [
+    {
+      "scene_number": 1,
+      "duration": 5,
+      "characters": ["Linh"],
+      "action": "bước vào frame nhìn thẳng camera",
+      "expression": "tự tin, ánh mắt sắc",
+      "camera_angle": "low angle medium shot, push in",
+      "dialogue": "Bạn có biết bí mật này không?",
+      "background": "studio minimalist, ánh vàng",
+      "visual_description": "Vietnamese girl, 18yo..., low angle, studio, dark luxury, 8k",
+      "type": "Hook — Pain Point"
+    }
+  ]
+}
 ```
 
-### Mount order trong server.py (quan trọng)
+**Cơ chế Claude CLI (QUAN TRỌNG):**
+
+Không dùng Anthropic SDK. Gọi qua subprocess để tận dụng OAuth session hiện tại của Claude Code CLI:
+
 ```python
-# Thứ tự này là bắt buộc — specific trước, general sau
-app.mount("/output/videos", ...)
-app.mount("/output/characters", ...)
-app.mount("/output", ...)
-# KHÔNG dùng app.mount("/", StaticFiles) — bắt tất cả POST → 405
-@app.get("/")           # thay bằng route GET
-@app.get("/{full_path:path}")
+# Windows: claude là .cmd file, phải dùng "cmd /c claude"
+# Prompt truyền qua STDIN thay vì argument vì Vietnamese chars → UnicodeEncodeError cp1252
+args = ["cmd", "/c", "claude", "-p", "-", "--output-format", "text", "--input-format", "text"]
+proc = await asyncio.create_subprocess_exec(*args, stdin=PIPE, stdout=PIPE, stderr=PIPE)
+stdout, stderr = await asyncio.wait_for(proc.communicate(input=prompt.encode("utf-8")), timeout=90)
 ```
 
-### localStorage keys
+---
+
+### POST `/api/image` — Generate 1 ảnh
+
+**File:** `api/images.py`
+
+```json
+// Request
+{"prompt": "Vietnamese girl, dark luxury, 8k", "aspect_ratio": "9:16", "scene_number": 1}
+
+// Response
+{"scene_number": 1, "image_url": "/output/scene_1_abc123.jpg", "prompt": "..."}
+```
+
+**FAL.ai aspect ratio mapping:**
+```python
+RATIO_MAP = {"9:16": "portrait_16_9", "1:1": "square", "16:9": "landscape_16_9"}
+```
+
+Model dùng: `fal-ai/flux/dev`, 28 steps, guidance 3.5
+
+---
+
+### POST `/api/batch` — Generate nhiều ảnh song song
+
+**File:** `api/batch.py`
+
+Nhận `scenes[]`, dùng `asyncio.Semaphore(5)` để giới hạn 5 concurrent FAL.ai calls.
+Scene có `visual_description` rỗng → skip tự động (không crash).
+
+```json
+// Request
+{"scenes": [...SceneOut objects...], "aspect_ratio": "9:16"}
+
+// Response
+{"total": 5, "completed": 5, "images": [...ImageResponse...]}
+```
+
+---
+
+### POST `/api/video` — Generate video clip Veo 3
+
+**File:** `api/video.py`
+
+```json
+// Request
+{"prompt": "...", "aspect_ratio": "9:16", "scene_number": 1, "duration_seconds": 5}
+
+// Response
+{"scene_number": 1, "video_url": "/output/videos/scene_1_abc123.mp4", "prompt": "...", "duration_seconds": 5}
+```
+
+**QUAN TRỌNG — những thứ đã sai và đã fix:**
+
+```python
+# SAI: generate_video (singular) → AttributeError
+client.models.generate_video(...)
+
+# ĐÚNG: generate_videos (plural)
+client.models.generate_videos(...)
+
+# SAI: model name không tồn tại
+model="veo-3.0-generate-preview"
+
+# ĐÚNG: model stable
+model="veo-3.0-generate-001"
+
+# SAI: enhance_prompt không hỗ trợ → 400 INVALID_ARGUMENT
+config=types.GenerateVideosConfig(enhance_prompt=True, ...)
+
+# SAI: duration_seconds gây lỗi → 400 INVALID_ARGUMENT
+config=types.GenerateVideosConfig(duration_seconds=5, ...)
+
+# ĐÚNG: chỉ aspect_ratio + number_of_videos
+config=types.GenerateVideosConfig(aspect_ratio="9:16", number_of_videos=1)
+```
+
+**Veo 3 models có sẵn:**
+```
+veo-2.0-generate-001        → cần billing
+veo-3.0-generate-001        → stable Veo 3, ~3 phút/video ← ĐANG DÙNG
+veo-3.0-fast-generate-001   → nhanh hơn
+veo-3.1-generate-preview    → mới nhất
+```
+
+**Polling pattern:**
+```python
+operation = client.models.generate_videos(...)
+while not operation.done:
+    await asyncio.sleep(10)
+    operation = client.operations.get(operation)
+video_url = operation.response.generated_videos[0].video.uri
+```
+
+---
+
+### POST `/api/character/generate-refs` — Reference sheet 6 góc
+
+**File:** `api/characters.py`
+
+```json
+// Request
+{
+  "name": "Linh",
+  "base_prompt": "Vietnamese girl, 18 years old, oval face, long black hair, slim",
+  "style": "photorealistic, studio lighting, white background, 8k",
+  "seed": 1234
+}
+
+// Response
+{
+  "name": "Linh",
+  "refs": [
+    {"label": "Front", "angle": "front view...", "image_url": "/output/characters/char_linh_0_front.jpg"},
+    {"label": "3/4 Left", ...},
+    {"label": "3/4 Right", ...},
+    {"label": "Side Profile", ...},
+    {"label": "Smile", ...},
+    {"label": "Dynamic", ...}
+  ]
+}
+```
+
+6 ảnh generate song song với seed tăng dần (seed, seed+1, ..., seed+5) để face nhất quán.
+Ảnh lưu tại `output/characters/char_{name}_{idx}_{label}.jpg`.
+
+---
+
+## 5. Frontend index.html — cấu trúc và cách hoạt động
+
+**File duy nhất ~1950 dòng.** Không có build step, không có framework. Vanilla JS.
+
+### State object (toàn bộ app state nằm đây)
+
+```javascript
+const state = {
+  idea: '',            // ý tưởng người dùng nhập
+  ratio: '9:16',       // tỷ lệ khung hình: "9:16" | "1:1" | "16:9"
+  duration: 30,        // thời lượng video (giây)
+  style: 'dark luxury',// phong cách video
+  characters: [],      // [{name, age, desc, prompt, refs:[], avatarUrl?}]
+  scenes: [],          // [{scene_number, duration, characters, action, expression, camera_angle, dialogue, background, visual_description, type}]
+  activeScene: null,   // index scene đang xem trong timeline
+  sbCols: 2,           // số cột storyboard grid
+  imageMap: {},        // {scene_number: "/output/scene_N_xxx.jpg"}
+  videoMap: {}         // {scene_number: "/output/videos/scene_N_xxx.mp4"}
+};
+```
+
+### Các hàm JS quan trọng
+
+| Hàm | Làm gì |
+|-----|--------|
+| `generateScript()` | async — gọi /api/script → /api/batch, update state |
+| `renderTimeline()` | Render timeline bar từ state.scenes |
+| `renderStoryboard()` | Render grid ảnh/video từ state.scenes + imageMap + videoMap |
+| `showSceneDetail(idx)` | Hiện 8-field card của scene |
+| `generateVideo(sceneIdx)` | async — gọi /api/video, update videoMap |
+| `generateCharacterRefs(idx)` | async — gọi /api/character/generate-refs |
+| `openAddCharacter()` | Hiện form thêm nhân vật |
+| `openEditCharacter(idx)` | Hiện form edit (pre-filled) |
+| `addCharacter()` | Thêm hoặc update nhân vật (dựa vào _editingIdx) |
+| `saveState()` | Ghi state vào localStorage |
+| `loadState()` | Đọc state từ localStorage |
+| `resetAll()` | Xóa tất cả + xóa localStorage |
+| `switchPage(name)` | Điều hướng giữa các trang |
+| `exportJSON()` | Download state thành .json |
+| `exportMarkdown()` | Download kịch bản thành .md |
+
+### localStorage
+
 ```javascript
 const STORAGE_KEY = 'aistudio_state_v1';
-const PERSIST_FIELDS = ['idea','ratio','duration','style','characters','scenes','imageMap','videoMap','sbCols'];
+// Lưu: idea, ratio, duration, style, characters, scenes, imageMap, videoMap, sbCols
+// Không lưu: activeScene (không cần)
+```
+
+**saveState() được gọi ở đâu:**
+- `updateStatus()` — sau mọi thay đổi
+- `selectPill()` — khi đổi ratio/style
+- `updateDuration()` / `setDuration()` — khi đổi duration
+- `oninput` trên textarea idea — mỗi keystroke
+
+### 5 trang (tabs) trong UI
+
+```
+Ý tưởng & Cấu hình  ← nhập idea, chọn ratio/duration/style
+Nhân vật             ← quản lý nhân vật, generate reference sheet
+Timeline             ← xem timeline + chi tiết từng cảnh
+Storyboard           ← grid ảnh/video, nút Gen Video per scene
+Export & Prompts     ← JSON / Markdown / AI Prompts
 ```
 
 ---
 
-## Những việc CÒN LẠI / TODO
-
-- [ ] **Upload reference image** cho nhân vật (IP-Adapter consistency)
-- [ ] **Batch video** — generate tất cả scenes thành video cùng lúc, không phải từng cái
-- [ ] **Export video** — ghép tất cả video clips thành 1 file hoàn chỉnh (ffmpeg)
-- [ ] **Project management** — lưu nhiều project khác nhau (hiện chỉ 1 state)
-- [ ] **FAL.ai balance** — cần nạp tiền để test image generation
-- [ ] **Veo 3 billing** — bật GCP billing để vượt quota 5 video/ngày
-- [ ] **AI Workflow tab** — hiện hiển thị "sắp ra mắt"
-- [ ] **Batch Generate tab** — hiện hiển thị "sắp ra mắt"
-
----
-
-## .env cần có
+## 6. .env — các keys cần thiết
 
 ```env
-GOOGLE_API_KEY=AIza...      # aistudio.google.com/apikey
-FAL_KEY=...                  # fal.ai/dashboard/keys
-OUTPUT_DIR=./output
-MAX_BATCH_PARALLEL=5
+GOOGLE_API_KEY=AIza...      # aistudio.google.com/apikey — dùng cho Veo 3
+FAL_KEY=...                  # fal.ai/dashboard/keys — dùng cho Flux images
+OUTPUT_DIR=./output          # thư mục lưu output
+MAX_BATCH_PARALLEL=5         # số requests FAL song song tối đa
 ```
 
-Anthropic **KHÔNG cần** key — Claude CLI dùng OAuth hiện tại.
+**Claude/Anthropic: KHÔNG cần key.** Dùng `claude` CLI OAuth session.
 
 ---
 
-## Git log gần nhất
+## 7. Lịch sử bugs đã fix — biết để không làm lại
 
+### Bug 1: 405 Method Not Allowed khi POST /api/script
+**Nguyên nhân:** `app.mount("/", StaticFiles(...))` bắt tất cả requests kể cả POST.
+**Fix:** Đổi sang `@app.get("/")` + `@app.get("/{full_path:path}")`. Không bao giờ dùng StaticFiles mount "/" nữa.
+
+### Bug 2: 3 processes tranh nhau port 3456
+**Nguyên nhân:** Preview tool khởi động server mới mà không kill server cũ. Curl nhận response từ server cũ (không có routes).
+**Fix:** Trước khi start server mới: `wmic process where "name='python.exe'" delete`
+
+### Bug 3: Routes empty trong `/openapi.json`
+**Nguyên nhân:** `uvicorn.run("server:app", reload=True)` — uvicorn import module trong subprocess mới, cwd khác → `api.*` import fail silently.
+**Fix:** `uvicorn.run(app, ...)` truyền app object trực tiếp.
+
+### Bug 4: cwd sai khi chạy qua preview tool
+**Nguyên nhân:** Preview tool chạy `python server.py` từ cwd không phải project root.
+**Fix:** 3 dòng đầu server.py: `os.chdir(Path(__file__).parent.resolve())`
+
+### Bug 5: UnicodeEncodeError khi gọi Claude CLI với tiếng Việt
+**Nguyên nhân:** Windows cp1252 không encode được UTF-8. Prompt dài có tiếng Việt → crash.
+**Fix:** Truyền prompt qua stdin thay vì argument: `claude -p -` + `proc.communicate(input=prompt.encode("utf-8"))`
+
+### Bug 6: `generate_video` AttributeError (Veo 3)
+**Fix:** Method đúng là `generate_videos` (plural).
+
+### Bug 7: `enhance_prompt` + `duration_seconds` → 400 INVALID_ARGUMENT (Veo 3)
+**Fix:** Remove cả hai khỏi `GenerateVideosConfig`.
+
+### Bug 8: Model `veo-3.0-generate-preview` → 404 NOT_FOUND
+**Fix:** Model đúng là `veo-3.0-generate-001`.
+
+### Bug 9: Infinite recursion trong updateStatus()
+**Nguyên nhân:** Cố patch `updateStatus` bằng function declaration mới. Do JS hoisting, `const _origUpdateStatus = updateStatus` capture chính function mới → infinite loop khi gọi.
+**Fix:** Gọi `saveState()` trực tiếp trong `updateStatus()` gốc, không dùng wrapper.
+
+### Bug 10: `openAddCharacter()` crash
+**Nguyên nhân:** `document.querySelector('#add-char-panel .panel-title').childNodes[2].textContent` → undefined.
+**Fix:** Xóa đoạn DOM query đó đi, chỉ giữ clear inputs + show panel.
+
+---
+
+## 8. Những việc CÒN LẠI (TODO)
+
+Theo thứ tự ưu tiên:
+
+1. **Nạp FAL.ai balance** → test image generation thật (fal.ai/dashboard/billing)
+2. **Veo 3 quota** → chờ reset hàng ngày hoặc bật GCP billing
+3. **Upload reference image cho nhân vật** → IP-Adapter consistency (hiện chỉ dùng text prompt)
+4. **Batch video** → button "Generate tất cả videos" thay vì từng cái
+5. **Ghép video** → ffmpeg concat tất cả clips thành 1 video hoàn chỉnh
+6. **Multi-project** → localStorage hiện chỉ lưu 1 project. Cần project list
+7. **AI Workflow tab** → hiện "sắp ra mắt"
+8. **Batch Generate tab** → hiện "sắp ra mắt"
+9. **Veo 3.1** → upgrade lên `veo-3.1-generate-preview` khi cần chất lượng cao hơn
+
+---
+
+## 9. Cách test nhanh từng endpoint
+
+```bash
+# Test script generation (cần claude CLI đã login)
+curl -X POST http://localhost:3456/api/script \
+  -H "Content-Type: application/json" \
+  -d '{"idea":"test video","duration":15,"style":"cinematic"}'
+
+# Test image (cần FAL_KEY có balance)
+curl -X POST http://localhost:3456/api/image \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Vietnamese girl, photorealistic","aspect_ratio":"9:16","scene_number":1}'
+
+# Test video (cần GOOGLE_API_KEY, ~3 phút)
+curl -X POST http://localhost:3456/api/video \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Vietnamese girl smiling","scene_number":1}'
+
+# Xem tất cả routes
+curl http://localhost:3456/openapi.json | python -m json.tool | grep '"/'
 ```
-e1b4ae2  fix: openAddCharacter crash
-1319c89  feat: localStorage persist - state survives F5
-767b512  feat: character edit button + multi-angle reference sheet
-becbc28  fix: remove duration_seconds from veo config
-0591b00  fix: veo model name veo-3.0-generate-001 (stable)
-2a59b5d  fix: google-genai SDK - generate_videos plural, remove enhance_prompt
-18a0b0d  feat: per-scene veo 3 video generation in storyboard ui
+
+---
+
+## 10. Git workflow
+
+```bash
+# Xem lịch sử
+git log --oneline
+
+# Lấy code mới nhất
+git pull
+
+# Push thay đổi
+git add -A
+git commit -m "feat/fix/docs: mô tả ngắn"
+git push
 ```
+
+**Lưu ý:** `.env` và `output/` đã gitignore, không bao giờ được commit.
+
+---
+
+## 11. Khi gặp vấn đề
+
+| Triệu chứng | Nguyên nhân | Fix |
+|-------------|-------------|-----|
+| `405 Method Not Allowed` | Server cũ còn chạy | `wmic process where "name='python.exe'" delete` rồi restart |
+| `paths: []` trong openapi.json | uvicorn string mode hoặc cwd sai | Kiểm tra server.py dùng `uvicorn.run(app, ...)` |
+| `claude CLI error` | OAuth session hết hạn | Chạy `claude` để login lại |
+| `FAL_KEY chưa cấu hình` | Thiếu .env | Tạo .env từ .env.example |
+| `Exhausted balance` FAL | Hết tiền | Nạp tại fal.ai/dashboard/billing |
+| `RESOURCE_EXHAUSTED` Veo | Hết quota | Chờ reset hoặc bật GCP billing |
+| `generate_video AttributeError` | Tên method sai | Dùng `generate_videos` (plural) |
+| F5 mất data | localStorage bị clear | Kiểm tra `saveState()` được gọi sau mỗi thay đổi |
+| Nút "+ Thêm nhân vật" không làm gì | JS crash trong openAddCharacter | Xem console DevTools (F12) |

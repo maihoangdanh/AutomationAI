@@ -34,17 +34,18 @@ async def generate_video(req: VideoRequest):
     aspect = RATIO_MAP.get(req.aspect_ratio, "9:16")
 
     try:
-        operation = client.models.generate_video(
+        # generate_videos (plural) — đúng tên method trong google-genai SDK
+        operation = client.models.generate_videos(
             model="veo-3.0-generate-preview",
             prompt=req.prompt,
-            config=types.GenerateVideoConfig(
+            config=types.GenerateVideosConfig(
                 aspect_ratio=aspect,
                 duration_seconds=req.duration_seconds,
                 number_of_videos=1,
-                enhance_prompt=True,
             )
         )
 
+        # Poll cho đến khi xong (Veo 3 mất 2–5 phút)
         while not operation.done:
             await asyncio.sleep(10)
             operation = client.operations.get(operation)

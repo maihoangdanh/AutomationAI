@@ -1,11 +1,19 @@
 import os
+import sys
 from pathlib import Path
+
+# Đảm bảo cwd đúng khi chạy qua preview tool
+_root = Path(__file__).parent.resolve()
+os.chdir(_root)
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
+
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
-load_dotenv()
+load_dotenv(_root / ".env")
 
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "./output"))
 OUTPUT_DIR.mkdir(exist_ok=True)
@@ -30,10 +38,26 @@ app.include_router(images_router, prefix="/api")
 app.include_router(batch_router, prefix="/api")
 app.include_router(video_router, prefix="/api")
 
+from fastapi import Request
+from fastapi.responses import FileResponse, HTMLResponse
+
 app.mount("/output/videos", StaticFiles(directory=str(OUTPUT_DIR / "videos")), name="videos")
 app.mount("/output", StaticFiles(directory=str(OUTPUT_DIR)), name="output")
-app.mount("/", StaticFiles(directory=".", html=True), name="static")
+
+# Serve static assets (CSS, JS files nếu có)
+@app.get("/")
+async def serve_index():
+    return FileResponse("index.html")
+
+# Catch-all cho các path khác không phải /api → trả index.html
+@app.get("/{full_path:path}")
+async def serve_static(full_path: str, request: Request):
+    from pathlib import Path as P
+    file = P(full_path)
+    if file.exists() and file.is_file():
+        return FileResponse(full_path)
+    return FileResponse("index.html")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server:app", host="0.0.0.0", port=3456, reload=True)
+    uvicorn.run(app, host="0.0.0.0", port=3456)

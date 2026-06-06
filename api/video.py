@@ -40,7 +40,6 @@ async def generate_video(req: VideoRequest):
             prompt=req.prompt,
             config=types.GenerateVideosConfig(
                 aspect_ratio=aspect,
-                duration_seconds=req.duration_seconds,
                 number_of_videos=1,
             )
         )

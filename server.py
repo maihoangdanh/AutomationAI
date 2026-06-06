@@ -18,6 +18,7 @@ load_dotenv(_root / ".env")
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "./output"))
 OUTPUT_DIR.mkdir(exist_ok=True)
 (OUTPUT_DIR / "videos").mkdir(exist_ok=True)
+(OUTPUT_DIR / "characters").mkdir(exist_ok=True)
 
 app = FastAPI(title="AI Studio Backend")
 
@@ -33,15 +34,18 @@ from api.script import router as script_router
 from api.images import router as images_router
 from api.batch import router as batch_router
 from api.video import router as video_router
+from api.characters import router as characters_router
 app.include_router(script_router, prefix="/api")
 app.include_router(images_router, prefix="/api")
 app.include_router(batch_router, prefix="/api")
 app.include_router(video_router, prefix="/api")
+app.include_router(characters_router, prefix="/api")
 
 from fastapi import Request
 from fastapi.responses import FileResponse, HTMLResponse
 
 app.mount("/output/videos", StaticFiles(directory=str(OUTPUT_DIR / "videos")), name="videos")
+app.mount("/output/characters", StaticFiles(directory=str(OUTPUT_DIR / "characters")), name="characters")
 app.mount("/output", StaticFiles(directory=str(OUTPUT_DIR)), name="output")
 
 # Serve static assets (CSS, JS files nếu có)

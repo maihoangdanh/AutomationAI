@@ -332,21 +332,32 @@
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: border-color 0.2s;
+  }
+  .character-card:hover { border-color: var(--border-gold); }
+  .character-card-top {
     display: grid;
-    grid-template-columns: 40px 1fr auto;
+    grid-template-columns: 48px 1fr auto;
     gap: 12px;
     align-items: start;
   }
   .character-avatar {
-    width: 40px; height: 40px;
+    width: 48px; height: 48px;
     border-radius: 50%;
     background: linear-gradient(135deg, var(--gold-dim), #3A3020);
-    border: 1px solid var(--gold-dim);
+    border: 2px solid var(--gold-dim);
     display: flex; align-items: center; justify-content: center;
-    font-size: 16px;
+    font-size: 18px;
     color: var(--gold-light);
     font-weight: 700;
+    overflow: hidden;
+    cursor: pointer;
+    flex-shrink: 0;
   }
+  .character-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
   .character-info .char-name {
     font-size: 13px; font-weight: 600;
     color: var(--text);
@@ -355,7 +366,69 @@
   .character-info .char-desc {
     font-size: 11px; color: var(--text-dim); line-height: 1.4;
   }
-  .character-actions { display: flex; gap: 4px; }
+  .character-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+
+  /* Reference sheet grid */
+  .char-refs {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    margin-top: 2px;
+  }
+  .char-ref-item {
+    position: relative;
+    aspect-ratio: 1/1;
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .char-ref-item:hover { border-color: var(--gold-dim); transform: scale(1.02); }
+  .char-ref-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .char-ref-label {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    background: rgba(0,0,0,0.65);
+    color: var(--gold-light);
+    font-size: 8px;
+    font-weight: 600;
+    text-align: center;
+    padding: 2px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .char-ref-placeholder {
+    width: 100%; height: 100%;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    color: var(--text-muted);
+    font-size: 9px;
+    gap: 3px;
+  }
+  .char-ref-placeholder .spin {
+    width: 14px; height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: var(--gold);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .char-gen-btn {
+    width: 100%;
+    padding: 6px;
+    border: 1px dashed var(--gold-dim);
+    background: rgba(201,168,76,0.04);
+    color: var(--gold-dim);
+    border-radius: 6px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: center;
+  }
+  .char-gen-btn:hover { border-color: var(--gold); color: var(--gold-light); background: rgba(201,168,76,0.08); }
+  .char-gen-btn:disabled { opacity: 0.5; cursor: not-allowed; }
   .btn-sm {
     padding: 4px 10px;
     border: 1px solid var(--border);
@@ -1097,31 +1170,104 @@ function setDuration(v) {
 }
 
 // ─── CHARACTER MANAGEMENT ───────────────────────────────────
+let _editingIdx = null;
+
 function openAddCharacter() {
+  _editingIdx = null;
+  document.querySelector('#add-char-panel .panel-title .dot').style.background = 'var(--gold)';
+  document.querySelector('#add-char-panel .panel-title').childNodes[2].textContent &&
+    (document.querySelector('#add-char-panel .panel-title').lastChild.textContent = 'THÊM NHÂN VẬT');
+  ['char-name','char-age','char-desc','char-prompt'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('add-char-panel').style.display = '';
 }
+
+function openEditCharacter(idx) {
+  _editingIdx = idx;
+  const c = state.characters[idx];
+  document.getElementById('char-name').value = c.name || '';
+  document.getElementById('char-age').value = c.age || '';
+  document.getElementById('char-desc').value = c.desc || '';
+  document.getElementById('char-prompt').value = c.prompt || '';
+  document.getElementById('add-char-panel').style.display = '';
+  notify(`Chỉnh sửa nhân vật: ${c.name}`);
+}
+
 function closeAddCharacter() {
+  _editingIdx = null;
   document.getElementById('add-char-panel').style.display = 'none';
   ['char-name','char-age','char-desc','char-prompt'].forEach(id =>
     document.getElementById(id).value = '');
 }
+
 function addCharacter() {
   const name = document.getElementById('char-name').value.trim();
   const age = document.getElementById('char-age').value.trim();
   const desc = document.getElementById('char-desc').value.trim();
   const prompt = document.getElementById('char-prompt').value.trim();
   if (!name) { notify('Vui lòng nhập tên nhân vật'); return; }
-  state.characters.push({ name, age, desc, prompt });
+
+  if (_editingIdx !== null) {
+    // Edit mode — giữ refs cũ
+    const existing = state.characters[_editingIdx];
+    state.characters[_editingIdx] = { ...existing, name, age, desc, prompt };
+    notify(`Đã cập nhật nhân vật: ${name}`);
+  } else {
+    state.characters.push({ name, age, desc, prompt, refs: [] });
+    notify(`Đã thêm nhân vật: ${name}`);
+  }
+
   closeAddCharacter();
   renderCharacters();
   updateStatus();
-  notify(`Đã thêm nhân vật: ${name}`);
 }
+
 function removeCharacter(idx) {
+  if (!confirm(`Xóa nhân vật "${state.characters[idx].name}"?`)) return;
   state.characters.splice(idx, 1);
   renderCharacters();
   updateStatus();
 }
+
+async function generateCharacterRefs(idx) {
+  const c = state.characters[idx];
+  if (!c.prompt && !c.desc) { notify('Nhân vật cần có mô tả hoặc base prompt'); return; }
+
+  const basePrompt = c.prompt || `${c.desc}, ${c.age ? c.age + ' years old,' : ''} photorealistic`;
+  notify(`🎨 Đang generate ${6} ảnh tham chiếu cho ${c.name}...`);
+
+  // Set loading state
+  state.characters[idx].refs = Array(6).fill({ loading: true });
+  renderCharacters();
+
+  try {
+    const resp = await fetch('/api/character/generate-refs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: c.name,
+        base_prompt: basePrompt,
+        style: 'photorealistic, studio lighting, high quality, 8k, sharp focus',
+        seed: Math.floor(Math.random() * 9000) + 1000
+      })
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.detail || 'Generate refs failed');
+    }
+    const data = await resp.json();
+    state.characters[idx].refs = data.refs;
+    // Dùng ảnh đầu làm avatar nếu có
+    const firstImg = data.refs.find(r => r.image_url);
+    if (firstImg) state.characters[idx].avatarUrl = firstImg.image_url;
+    renderCharacters();
+    notify(`✓ Hoàn tất ${data.refs.filter(r=>r.image_url).length}/6 ảnh tham chiếu cho ${c.name}`);
+  } catch (err) {
+    state.characters[idx].refs = [];
+    renderCharacters();
+    notify('Lỗi generate refs: ' + err.message);
+  }
+}
+
 function renderCharacters() {
   const list = document.getElementById('character-list');
   const empty = document.getElementById('char-empty');
@@ -1132,19 +1278,46 @@ function renderCharacters() {
     return;
   }
   empty.style.display = 'none';
-  list.innerHTML = state.characters.map((c, i) => `
+  list.innerHTML = state.characters.map((c, i) => {
+    // Avatar: dùng ảnh ref đầu nếu có
+    const avatarHtml = c.avatarUrl
+      ? `<img src="${c.avatarUrl}" alt="${c.name}" />`
+      : c.name[0].toUpperCase();
+
+    // Reference sheet
+    let refsHtml = '';
+    if (c.refs && c.refs.length > 0) {
+      refsHtml = `<div class="char-refs">` + c.refs.map(r => {
+        if (r.loading) return `<div class="char-ref-item"><div class="char-ref-placeholder"><div class="spin"></div></div></div>`;
+        if (!r.image_url) return `<div class="char-ref-item"><div class="char-ref-placeholder" style="font-size:9px;color:var(--accent-red)">✕</div></div>`;
+        return `<div class="char-ref-item" onclick="window.open('${r.image_url}','_blank')">
+          <img src="${r.image_url}" loading="lazy" />
+          <div class="char-ref-label">${r.label}</div>
+        </div>`;
+      }).join('') + `</div>`;
+    }
+
+    const hasRefs = c.refs && c.refs.length > 0 && !c.refs[0].loading;
+    const genBtnLabel = hasRefs ? '↻ Regenerate Refs' : '✦ Generate Reference Sheet (6 góc)';
+
+    return `
     <div class="character-card">
-      <div class="character-avatar">${c.name[0].toUpperCase()}</div>
-      <div class="character-info">
-        <div class="char-name">${c.name}${c.age ? ' · ' + c.age + ' tuổi' : ''}</div>
-        <div class="char-desc">${c.desc || '(Chưa có mô tả)'}</div>
-        ${c.prompt ? `<div class="char-desc mt-8" style="color:var(--gold-dim);font-size:10px;font-family:monospace">${c.prompt.slice(0,80)}...</div>` : ''}
+      <div class="character-card-top">
+        <div class="character-avatar" onclick="openEditCharacter(${i})" title="Click để sửa">${avatarHtml}</div>
+        <div class="character-info">
+          <div class="char-name">${c.name}${c.age ? ' · ' + c.age + ' tuổi' : ''}</div>
+          <div class="char-desc">${c.desc || '(Chưa có mô tả)'}</div>
+          ${c.prompt ? `<div class="char-desc mt-8" style="color:var(--gold-dim);font-size:10px;font-family:monospace">${c.prompt.slice(0,80)}${c.prompt.length>80?'...':''}</div>` : ''}
+        </div>
+        <div class="character-actions">
+          <button class="btn-sm" onclick="openEditCharacter(${i})" title="Chỉnh sửa">✎</button>
+          <button class="btn-sm" onclick="removeCharacter(${i})" title="Xóa">✕</button>
+        </div>
       </div>
-      <div class="character-actions">
-        <button class="btn-sm" onclick="removeCharacter(${i})">✕</button>
-      </div>
-    </div>
-  `).join('');
+      ${refsHtml}
+      <button class="char-gen-btn" onclick="generateCharacterRefs(${i})">${genBtnLabel}</button>
+    </div>`;
+  }).join('');
 }
 
 // ─── SCRIPT GENERATION ──────────────────────────────────────

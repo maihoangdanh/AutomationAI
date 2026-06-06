@@ -24,12 +24,13 @@ app.add_middleware(
 from api.script import router as script_router
 from api.images import router as images_router
 from api.batch import router as batch_router
-# from api.video import router as video_router
+from api.video import router as video_router
 app.include_router(script_router, prefix="/api")
 app.include_router(images_router, prefix="/api")
 app.include_router(batch_router, prefix="/api")
-# app.include_router(video_router, prefix="/api")
+app.include_router(video_router, prefix="/api")
 
+app.mount("/output/videos", StaticFiles(directory=str(OUTPUT_DIR / "videos")), name="videos")
 app.mount("/output", StaticFiles(directory=str(OUTPUT_DIR)), name="output")
 app.mount("/", StaticFiles(directory=".", html=True), name="static")
 

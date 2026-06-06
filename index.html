@@ -1020,7 +1020,8 @@ const state = {
   scenes: [],
   activeScene: null,
   sbCols: 2,
-  imageMap: {}
+  imageMap: {},
+  videoMap: {}
 };
 
 // ─── SCENE LABELS ───────────────────────────────────────────
@@ -1433,11 +1434,24 @@ function renderStoryboard() {
   empty.style.display = 'none';
   grid.style.display = '';
   const ratioClass = state.ratio === '9:16' ? '' : state.ratio === '1:1' ? 'ratio-1-1' : 'ratio-16-9';
+
   grid.innerHTML = state.scenes.map((sc, i) => {
+    const videoUrl = state.videoMap && state.videoMap[sc.scene_number];
     const imgUrl = state.imageMap && state.imageMap[sc.scene_number];
-    const thumbHtml = imgUrl
-      ? `<img src="${imgUrl}" style="width:100%;height:100%;object-fit:cover;display:block;" loading="lazy" />`
-      : `<div class="sb-thumb-placeholder"><div class="sb-icon">▦</div><div>${sc.type}</div></div>`;
+
+    let thumbHtml;
+    if (videoUrl) {
+      thumbHtml = `<video src="${videoUrl}" autoplay loop muted playsinline style="width:100%;height:100%;object-fit:cover;display:block;"></video>`;
+    } else if (imgUrl) {
+      thumbHtml = `<img src="${imgUrl}" style="width:100%;height:100%;object-fit:cover;display:block;" loading="lazy" />`;
+    } else {
+      thumbHtml = `<div class="sb-thumb-placeholder"><div class="sb-icon">▦</div><div>${sc.type}</div></div>`;
+    }
+
+    const videoBtn = videoUrl
+      ? `<button class="sb-copy-btn" style="border-color:var(--gold-dim);color:var(--gold)" onclick="event.stopPropagation()">✓ Video Ready</button>`
+      : `<button class="sb-copy-btn" onclick="event.stopPropagation();generateVideo(${i})">🎬 Gen Video (~3 phút)</button>`;
+
     return `
       <div class="storyboard-card" onclick="goToScene(${i})">
         <div class="sb-thumb ${ratioClass}" style="position:relative;overflow:hidden;">
@@ -1448,7 +1462,8 @@ function renderStoryboard() {
         <div class="sb-info">
           <div class="sb-label">${sc.type}</div>
           <div class="sb-desc">${sc.action}</div>
-          <button class="sb-copy-btn" onclick="event.stopPropagation();copyPrompt(${i})">⧉ Copy AI Prompt</button>
+          <button class="sb-copy-btn" onclick="event.stopPropagation();copyPrompt(${i})">⧉ Copy Prompt</button>
+          ${videoBtn}
         </div>
       </div>`;
   }).join('');
@@ -1469,6 +1484,35 @@ function cycleGrid() {
 function copyPrompt(idx) {
   navigator.clipboard.writeText(state.scenes[idx].visual_description);
   notify('Đã copy AI prompt!');
+}
+
+async function generateVideo(sceneIdx) {
+  const sc = state.scenes[sceneIdx];
+  if (!sc) return;
+  notify(`Đang generate video cảnh ${sc.scene_number}... (~3 phút)`);
+  try {
+    const resp = await fetch('/api/video', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: sc.visual_description,
+        aspect_ratio: state.ratio,
+        scene_number: sc.scene_number,
+        duration_seconds: Math.min(sc.duration, 8)
+      })
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.detail || 'Video generation failed');
+    }
+    const data = await resp.json();
+    if (!state.videoMap) state.videoMap = {};
+    state.videoMap[sc.scene_number] = data.video_url;
+    renderStoryboard();
+    notify(`✓ Video cảnh ${sc.scene_number} hoàn tất!`);
+  } catch (err) {
+    notify('Lỗi video: ' + err.message);
+  }
 }
 function copyAllPrompts() {
   const text = state.scenes.map((s,i) => `Scene ${i+1}: ${s.visual_description}`).join('\n\n');

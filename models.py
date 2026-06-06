@@ -1,0 +1,69 @@
+from pydantic import BaseModel
+from typing import Optional
+
+
+class ScriptRequest(BaseModel):
+    idea: str
+    aspect_ratio: str = "9:16"
+    duration: int = 30
+    style: str = "dark luxury"
+    characters: list[dict] = []
+
+
+class SceneOut(BaseModel):
+    scene_number: int
+    duration: int
+    characters: list[str]
+    action: str
+    expression: str
+    camera_angle: str
+    dialogue: Optional[str]
+    background: str
+    visual_description: str
+    type: str
+
+
+class ScriptResponse(BaseModel):
+    concept: str
+    aspect_ratio: str
+    total_duration: int
+    style: str
+    scenes: list[SceneOut]
+
+
+class ImageRequest(BaseModel):
+    prompt: str
+    aspect_ratio: str = "9:16"
+    scene_number: int = 1
+
+
+class ImageResponse(BaseModel):
+    scene_number: int
+    image_url: str
+    prompt: str
+
+
+class BatchRequest(BaseModel):
+    scenes: list[SceneOut]
+    aspect_ratio: str = "9:16"
+
+
+class BatchResponse(BaseModel):
+    total: int
+    completed: int
+    images: list[ImageResponse]
+
+
+class VideoRequest(BaseModel):
+    prompt: str
+    aspect_ratio: str = "9:16"
+    scene_number: int = 1
+    duration_seconds: int = 5
+    reference_image_url: Optional[str] = None
+
+
+class VideoResponse(BaseModel):
+    scene_number: int
+    video_url: str
+    prompt: str
+    duration_seconds: int

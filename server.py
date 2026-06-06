@@ -51,7 +51,7 @@ app.mount("/output", StaticFiles(directory=str(OUTPUT_DIR)), name="output")
 # Serve static assets (CSS, JS files nếu có)
 @app.get("/")
 async def serve_index():
-    return FileResponse("index.html")
+    return FileResponse("index.html", headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 # Catch-all cho các path khác không phải /api → trả index.html
 @app.get("/{full_path:path}")

@@ -816,6 +816,7 @@
       <button class="tab-btn" onclick="switchTab('code')">CODE</button>
     </div>
     <div class="topbar-actions">
+      <button class="btn-icon" title="Reset / Xóa tất cả" onclick="resetAll()" style="font-size:12px">⟳</button>
       <button class="btn-icon" title="Settings" onclick="notify('Cài đặt đang phát triển')">⚙</button>
       <button class="btn-icon" title="Export" onclick="exportJSON()">↑</button>
     </div>
@@ -883,7 +884,7 @@
           <div class="panel-body">
             <div class="form-group">
               <label class="form-label">Nhập ý tưởng hoặc chủ đề</label>
-              <textarea class="form-textarea" id="idea-input" placeholder="VD: Quảng cáo áo thun nữ phong cách urban, người xem là gen Z 18-25 tuổi, muốn thể hiện sự tự tin và phong cách riêng..." rows="4"></textarea>
+              <textarea class="form-textarea" id="idea-input" placeholder="VD: Quảng cáo áo thun nữ phong cách urban, người xem là gen Z 18-25 tuổi, muốn thể hiện sự tự tin và phong cách riêng..." rows="4" oninput="state.idea=this.value;saveState()"></textarea>
             </div>
           </div>
         </div>
@@ -1154,7 +1155,7 @@ function selectPill(btn, groupId, val) {
   document.querySelectorAll(`#${groupId} .pill`).forEach(p => p.classList.remove('selected'));
   btn.classList.add('selected');
   if (groupId === 'ratio-group') { state.ratio = val; updateStatus(); }
-  if (groupId === 'style-group') state.style = val;
+  if (groupId === 'style-group') { state.style = val; saveState(); }
 }
 function updateDuration(v) {
   state.duration = +v;
@@ -1162,11 +1163,13 @@ function updateDuration(v) {
   document.querySelectorAll('.pill-group .pill').forEach(p => {
     if (!p.dataset.val && p.textContent.includes('s')) p.classList.remove('selected');
   });
+  saveState();
 }
 function setDuration(v) {
   state.duration = v;
   document.getElementById('duration-slider').value = v;
   document.getElementById('duration-val').textContent = v + 's';
+  saveState();
 }
 
 // ─── CHARACTER MANAGEMENT ───────────────────────────────────
@@ -1763,6 +1766,7 @@ function updateStatus() {
   document.getElementById('status-scenes').textContent = state.scenes.length + ' scenes';
   document.getElementById('status-chars').textContent = state.characters.length + ' nhân vật';
   document.getElementById('status-ratio').textContent = state.ratio;
+  saveState();
 }
 
 // ─── NOTIFICATION ────────────────────────────────────────────
@@ -1775,8 +1779,74 @@ function notify(msg) {
   notifTimer = setTimeout(() => el.classList.remove('show'), 2400);
 }
 
+// ─── RESET ALL ───────────────────────────────────────────────
+function resetAll() {
+  if (!confirm('Xóa toàn bộ kịch bản, nhân vật và storyboard hiện tại?')) return;
+  state.idea = ''; state.scenes = []; state.characters = [];
+  state.imageMap = {}; state.videoMap = {}; state.activeScene = null;
+  document.getElementById('idea-input').value = '';
+  renderTimeline(); renderStoryboard(); renderCharacters();
+  document.getElementById('scene-count').textContent = '0';
+  document.getElementById('char-count').textContent = '0';
+  localStorage.removeItem(STORAGE_KEY);
+  updateStatus();
+  notify('Đã reset toàn bộ');
+}
+
+// ─── PERSIST STATE (localStorage) ───────────────────────────
+const STORAGE_KEY = 'aistudio_state_v1';
+
+// Những field cần lưu (bỏ qua imageMap/videoMap vì URL /output/ còn phụ thuộc server)
+const PERSIST_FIELDS = ['idea', 'ratio', 'duration', 'style', 'characters', 'scenes', 'imageMap', 'videoMap', 'sbCols'];
+
+function saveState() {
+  try {
+    const toSave = {};
+    PERSIST_FIELDS.forEach(k => { toSave[k] = state[k]; });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+  } catch(e) { /* quota exceeded — ignore */ }
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    PERSIST_FIELDS.forEach(k => {
+      if (saved[k] !== undefined) state[k] = saved[k];
+    });
+  } catch(e) { localStorage.removeItem(STORAGE_KEY); }
+}
+
+// Auto-save sau mỗi lần updateStatus (gọi trực tiếp)
+
 // ─── INIT ────────────────────────────────────────────────────
+loadState();
 updateStatus();
+
+// Restore UI từ state đã load
+if (state.scenes.length) {
+  renderTimeline();
+  renderStoryboard();
+  document.getElementById('scene-count').textContent = state.scenes.length;
+}
+if (state.characters.length) {
+  renderCharacters();
+  document.getElementById('char-count').textContent = state.characters.length;
+}
+if (state.idea) {
+  document.getElementById('idea-input').value = state.idea;
+}
+// Restore pill selections
+document.querySelectorAll('#ratio-group .pill').forEach(p => {
+  p.classList.toggle('selected', p.dataset.val === state.ratio);
+});
+document.querySelectorAll('#style-group .pill').forEach(p => {
+  p.classList.toggle('selected', p.dataset.val === state.style);
+});
+document.getElementById('duration-slider').value = state.duration;
+document.getElementById('duration-val').textContent = state.duration + 's';
+document.getElementById('status-ratio').textContent = state.ratio;
 </script>
 </body>
 </html>

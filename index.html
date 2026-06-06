@@ -1177,9 +1177,6 @@ let _editingIdx = null;
 
 function openAddCharacter() {
   _editingIdx = null;
-  document.querySelector('#add-char-panel .panel-title .dot').style.background = 'var(--gold)';
-  document.querySelector('#add-char-panel .panel-title').childNodes[2].textContent &&
-    (document.querySelector('#add-char-panel .panel-title').lastChild.textContent = 'THÊM NHÂN VẬT');
   ['char-name','char-age','char-desc','char-prompt'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('add-char-panel').style.display = '';
 }

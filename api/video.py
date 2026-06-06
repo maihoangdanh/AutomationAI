@@ -36,7 +36,7 @@ async def generate_video(req: VideoRequest):
     try:
         # generate_videos (plural) — đúng tên method trong google-genai SDK
         operation = client.models.generate_videos(
-            model="veo-3.0-generate-preview",
+            model="veo-3.0-generate-001",
             prompt=req.prompt,
             config=types.GenerateVideosConfig(
                 aspect_ratio=aspect,

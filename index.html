@@ -429,6 +429,38 @@
   }
   .char-gen-btn:hover { border-color: var(--gold); color: var(--gold-light); background: rgba(201,168,76,0.08); }
   .char-gen-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* ─── CHARACTER MODEL DROPDOWN ─────────────────────────── */
+  .char-model-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .char-model-group {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .char-model-label {
+    font-size: 9px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .char-model-select {
+    background: #1a1a1a;
+    border: 1px solid var(--border);
+    color: #e0e0e0;
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 10px;
+    cursor: pointer;
+    width: 100%;
+  }
+  .char-model-select:focus { outline: none; border-color: var(--gold-dim); }
+  .char-model-select option { background: #1a1a1a; color: #e0e0e0; }
+
   .btn-sm {
     padding: 4px 10px;
     border: 1px solid var(--border);
@@ -1228,12 +1260,52 @@ function removeCharacter(idx) {
   updateStatus();
 }
 
+const FAL_MODELS = [
+  { value: 'fal-ai/flux/dev',      label: 'Flux Dev' },
+  { value: 'fal-ai/flux-pro',      label: 'Flux Pro' },
+  { value: 'fal-ai/flux-realism',  label: 'Flux Realism' },
+];
+const GOOGLE_MODELS = [
+  { value: 'imagen-4.0-generate-001',      label: 'Imagen 4' },
+  { value: 'imagen-4.0-fast-generate-001', label: 'Imagen 4 Fast' },
+  { value: 'imagen-4.0-ultra-generate-001',label: 'Imagen 4 Ultra' },
+  { value: 'gemini-2.5-flash-image',        label: 'Gemini 2.5 Flash' },
+  { value: 'gemini-3.1-flash-image-preview',label: 'Gemini 3.1 Flash' },
+];
+
+function _getModelOptions(provider, selectedModel) {
+  const list = provider === 'google' ? GOOGLE_MODELS : FAL_MODELS;
+  const def = list[0].value;
+  return list.map(m =>
+    `<option value="${m.value}" ${(selectedModel||def)===m.value?'selected':''}>${m.label}</option>`
+  ).join('');
+}
+
+function onCharProviderChange(idx) {
+  const sel = document.getElementById(`char-provider-${idx}`);
+  const provider = sel.value;
+  state.characters[idx].imageProvider = provider;
+  // Reset model về default của provider mới
+  const list = provider === 'google' ? GOOGLE_MODELS : FAL_MODELS;
+  state.characters[idx].imageModel = list[0].value;
+  saveState();
+  renderCharacters();
+}
+
+function onCharModelChange(idx) {
+  const sel = document.getElementById(`char-model-${idx}`);
+  state.characters[idx].imageModel = sel.value;
+  saveState();
+}
+
 async function generateCharacterRefs(idx) {
   const c = state.characters[idx];
   if (!c.prompt && !c.desc) { notify('Nhân vật cần có mô tả hoặc base prompt'); return; }
 
   const basePrompt = c.prompt || `${c.desc}, ${c.age ? c.age + ' years old,' : ''} photorealistic`;
-  notify(`🎨 Đang generate ${6} ảnh tham chiếu cho ${c.name}...`);
+  const provider = c.imageProvider || 'fal';
+  const model = c.imageModel || 'fal-ai/flux/dev';
+  notify(`🎨 Đang generate ${6} ảnh tham chiếu cho ${c.name} (${provider})...`);
 
   // Set loading state
   state.characters[idx].refs = Array(6).fill({ loading: true });
@@ -1247,7 +1319,9 @@ async function generateCharacterRefs(idx) {
         name: c.name,
         base_prompt: basePrompt,
         style: 'photorealistic, studio lighting, high quality, 8k, sharp focus',
-        seed: Math.floor(Math.random() * 9000) + 1000
+        seed: Math.floor(Math.random() * 9000) + 1000,
+        provider: provider,
+        model: model
       })
     });
     if (!resp.ok) {
@@ -1289,7 +1363,7 @@ function renderCharacters() {
     if (c.refs && c.refs.length > 0) {
       refsHtml = `<div class="char-refs">` + c.refs.map(r => {
         if (r.loading) return `<div class="char-ref-item"><div class="char-ref-placeholder"><div class="spin"></div></div></div>`;
-        if (!r.image_url) return `<div class="char-ref-item"><div class="char-ref-placeholder" style="font-size:9px;color:var(--accent-red)">✕</div></div>`;
+        if (!r.image_url) return `<div class="char-ref-item"><div class="char-ref-placeholder" style="font-size:9px;color:var(--accent-red)" title="${r.error||''}">✕<br>${(r.error||'').substring(0,40)}</div></div>`;
         return `<div class="char-ref-item" onclick="window.open('${r.image_url}','_blank')">
           <img src="${r.image_url}" loading="lazy" />
           <div class="char-ref-label">${r.label}</div>
@@ -1315,6 +1389,21 @@ function renderCharacters() {
         </div>
       </div>
       ${refsHtml}
+      <div class="char-model-row">
+        <div class="char-model-group">
+          <div class="char-model-label">Nguồn</div>
+          <select class="char-model-select" onchange="onCharProviderChange(${i})" id="char-provider-${i}">
+            <option value="fal" ${(c.imageProvider||'fal')==='fal'?'selected':''}>FAL.ai</option>
+            <option value="google" ${(c.imageProvider||'fal')==='google'?'selected':''}>Google Imagen</option>
+          </select>
+        </div>
+        <div class="char-model-group">
+          <div class="char-model-label">Model</div>
+          <select class="char-model-select" onchange="onCharModelChange(${i})" id="char-model-${i}">
+            ${_getModelOptions(c.imageProvider||'fal', c.imageModel)}
+          </select>
+        </div>
+      </div>
       <button class="char-gen-btn" onclick="generateCharacterRefs(${i})">${genBtnLabel}</button>
     </div>`;
   }).join('');

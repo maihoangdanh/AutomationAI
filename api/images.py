@@ -14,20 +14,27 @@ RATIO_MAP = {
     "16:9": "landscape_16_9"
 }
 
-# Keywords để nhận biết cảnh có xuất hiện sản phẩm
 PRODUCT_KEYWORDS = [
     "product", "tube", "bottle", "jar", "serum", "cream", "gel", "lotion",
-    "packaging", "brand", "logo", "label", "closeup product", "close-up product",
-    "holding product", "apply", "skincare", "acne gel", "anti acne",
-    # Tiếng Việt
-    "sản phẩm", "tuýp", "chai", "hộp", "kem", "serum",
+    "packaging", "brand", "logo", "label", "closeup product", "holding product",
+    "apply", "skincare", "acne gel", "anti acne",
+    "sản phẩm", "tuýp", "chai", "hộp", "kem",
 ]
 
 
 def _is_product_scene(prompt: str) -> bool:
-    """Trả về True nếu prompt mô tả cảnh có sản phẩm xuất hiện."""
     low = prompt.lower()
     return any(kw in low for kw in PRODUCT_KEYWORDS)
+
+
+def _resolve_url(path: str) -> str:
+    """Chuyển relative path → absolute URL để FAL.ai có thể fetch."""
+    if not path:
+        return path
+    if path.startswith("/"):
+        base = os.getenv("BASE_URL", "http://localhost:3456")
+        return f"{base}{path}"
+    return path
 
 
 async def _download_image(url: str, dest: Path) -> None:
@@ -38,7 +45,6 @@ async def _download_image(url: str, dest: Path) -> None:
 
 
 async def _gen_standard(prompt: str, image_size: str) -> dict:
-    """Gen ảnh thường bằng Flux Dev."""
     return await fal_client.run_async(
         "fal-ai/flux/dev",
         arguments={
@@ -52,19 +58,14 @@ async def _gen_standard(prompt: str, image_size: str) -> dict:
     )
 
 
-async def _gen_with_product_ref(prompt: str, image_size: str, product_image_url: str) -> dict:
-    """Gen ảnh dùng ảnh SP làm reference qua flux-pro/v1/redux.
-    Redux giữ được visual identity của SP (hình dáng, màu sắc, logo) ~70-80%.
+async def _gen_with_reference(prompt: str, image_size: str, reference_url: str) -> dict:
+    """Gen ảnh dùng reference image qua flux-pro/v1/redux.
+    Giữ được visual identity (khuôn mặt / không gian / SP) ~70-80%.
     """
-    # Resolve absolute URL nếu là relative path (/output/products/...)
-    base_url = os.getenv("BASE_URL", "http://localhost:3456")
-    if product_image_url.startswith("/"):
-        product_image_url = f"{base_url}{product_image_url}"
-
     return await fal_client.run_async(
         "fal-ai/flux-pro/v1/redux",
         arguments={
-            "image_url": product_image_url,
+            "image_url": reference_url,
             "prompt": prompt,
             "image_size": image_size,
             "num_inference_steps": 28,
@@ -76,24 +77,40 @@ async def _gen_with_product_ref(prompt: str, image_size: str, product_image_url:
 
 @router.post("/image", response_model=ImageResponse)
 async def generate_image(req: ImageRequest):
-    fal_key = os.getenv("FAL_KEY")
-    if not fal_key:
+    if not os.getenv("FAL_KEY"):
         raise HTTPException(500, "FAL_KEY chưa được cấu hình trong .env")
 
     image_size = RATIO_MAP.get(req.aspect_ratio, "portrait_16_9")
-    use_product_ref = (
-        req.product_image_url
-        and _is_product_scene(req.prompt)
-    )
+
+    # ── Priority logic ──────────────────────────────────────────
+    # 1. prev_scene_image_url  → continuity không gian + nhân vật từ cảnh trước
+    # 2. character_image_url   → lock khuôn mặt nhân vật (scene đầu tiên)
+    # 3. product_image_url     → chỉ dùng cho cảnh có SP
+    # 4. None                  → gen thường từ prompt
+    reference_url = None
+    ref_type = "standard"
+
+    if req.prev_scene_image_url:
+        reference_url = _resolve_url(req.prev_scene_image_url)
+        ref_type = "prev_scene"
+    elif req.character_image_url:
+        reference_url = _resolve_url(req.character_image_url)
+        ref_type = "character"
+    elif req.product_image_url and _is_product_scene(req.prompt):
+        reference_url = _resolve_url(req.product_image_url)
+        ref_type = "product"
+
+    print(f"[IMAGE] scene={req.scene_number}  ref={ref_type}  url={reference_url or 'none'}", flush=True)
 
     try:
-        if use_product_ref:
-            result = await _gen_with_product_ref(req.prompt, image_size, req.product_image_url)
+        if reference_url:
+            result = await _gen_with_reference(req.prompt, image_size, reference_url)
         else:
             result = await _gen_standard(req.prompt, image_size)
     except Exception as e:
-        # Nếu redux fail (quota/key issue) → fallback về standard
-        if use_product_ref:
+        if reference_url:
+            # Fallback về standard nếu redux fail
+            print(f"[IMAGE] redux failed ({e}), fallback to standard", flush=True)
             try:
                 result = await _gen_standard(req.prompt, image_size)
             except Exception as e2:

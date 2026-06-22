@@ -489,6 +489,39 @@
   }
   .btn-storyboard:hover { background: rgba(201,168,76,0.25); border-color: var(--gold); }
 
+  /* ─── MERGE VIDEO ──────────────────────────────────────── */
+  .merge-dropzone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius-lg);
+    padding: 32px 20px;
+    text-align: center;
+    transition: border-color 0.2s;
+    margin-bottom: 16px;
+  }
+  .merge-dropzone.drag-over { border-color: var(--gold); background: rgba(201,168,76,0.05); }
+  .merge-drop-icon { font-size: 32px; color: var(--text-muted); margin-bottom: 8px; }
+  .merge-drop-label { font-size: 13px; color: var(--text-dim); }
+  .merge-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+  .merge-item {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 8px 12px;
+    cursor: grab;
+  }
+  .merge-item.drag-ghost { opacity: 0.4; }
+  .merge-item-num {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: var(--gold-dim); color: var(--gold-light);
+    font-size: 11px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .merge-item-name { flex: 1; font-size: 12px; color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .merge-item-size { font-size: 11px; color: var(--text-dim); flex-shrink: 0; }
+  .merge-item-del { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 14px; padding: 0 4px; flex-shrink: 0; }
+  .merge-item-del:hover { color: var(--accent-red); }
+  .merge-actions { display: flex; gap: 8px; margin-bottom: 16px; }
+  .merge-result { background: var(--bg-card); border: 1px solid var(--border-gold); border-radius: var(--radius-lg); padding: 16px; }
+
   /* ─── REF SLOTS trong panel add/edit ───────────────────── */
   .ref-slots-grid {
     display: grid;
@@ -553,6 +586,21 @@
     transition: all 0.15s;
   }
   .btn-sm:hover { border-color: var(--gold-dim); color: var(--gold-light); }
+  .btn-copy-brief {
+    padding: 3px 10px;
+    border: 1px solid var(--gold-dim);
+    background: transparent;
+    color: var(--gold-light);
+    border-radius: 5px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .btn-copy-brief:hover { background: rgba(201,168,76,0.15); border-color: var(--gold); }
+  .btn-seq { border-color: var(--gold-dim); color: var(--gold-light); }
+  .btn-seq:hover { background: rgba(201,168,76,0.15); border-color: var(--gold); }
+  .btn-seq:disabled { opacity: 0.5; cursor: not-allowed; }
   .btn-add {
     width: 100%;
     padding: 9px;
@@ -959,12 +1007,9 @@
     </div>
     <div class="sidebar-divider"></div>
     <div class="sidebar-section">
-      <div class="sidebar-label">Automation</div>
-      <div class="sidebar-item" onclick="notify('Tính năng sắp ra mắt')">
-        <span class="icon">⟳</span> Batch Generate
-      </div>
-      <div class="sidebar-item" onclick="notify('Tính năng sắp ra mắt')">
-        <span class="icon">⚡</span> AI Workflow
+      <div class="sidebar-label">Tools</div>
+      <div class="sidebar-item" onclick="switchPage('merge')">
+        <span class="icon">⬡</span> Ghép Video
       </div>
     </div>
     <div class="sidebar-footer">
@@ -1208,6 +1253,7 @@
                 <option value="fal">FAL.ai Kling</option>
               </select>
               <select class="char-model-select" id="video-model-sel" onchange="onVideoModelChange()" style="width:auto;font-size:10px"></select>
+              <button class="btn-sm btn-seq" id="btn-seq-gen" onclick="generateBatchSequential()">▶ Gen Tuần Tự</button>
               <button class="btn-sm" onclick="cycleGrid()">⊞ Grid</button>
               <button class="btn-sm" onclick="copyAllPrompts()">⧉ Copy All Prompts</button>
             </div>
@@ -1246,6 +1292,48 @@
           </div>
         </div>
       </div><!-- /page-output -->
+
+      <!-- PAGE: Merge Video -->
+      <div class="page" id="page-merge">
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title"><div class="dot"></div>GHÉP VIDEO</div>
+            <div style="font-size:11px;color:var(--text-dim)">Upload theo thứ tự → Ghép thành 1 file</div>
+          </div>
+          <div class="panel-body">
+
+            <!-- Drop zone -->
+            <div class="merge-dropzone" id="merge-dropzone"
+                 ondragover="event.preventDefault();this.classList.add('drag-over')"
+                 ondragleave="this.classList.remove('drag-over')"
+                 ondrop="onMergeDrop(event)">
+              <div class="merge-drop-icon">⬡</div>
+              <div class="merge-drop-label">Kéo thả video vào đây hoặc</div>
+              <label class="btn-export primary" style="cursor:pointer;margin-top:8px">
+                Chọn file
+                <input type="file" accept="video/*" multiple style="display:none" onchange="onMergeFileSelect(event)">
+              </label>
+              <div style="font-size:11px;color:var(--text-dim);margin-top:8px">MP4, MOV, WebM — kéo để sắp xếp thứ tự</div>
+            </div>
+
+            <!-- File list -->
+            <div class="merge-list" id="merge-list"></div>
+
+            <!-- Actions -->
+            <div class="merge-actions" id="merge-actions" style="display:none">
+              <button class="btn-export primary" onclick="startMerge()">⬡ Ghép Video</button>
+              <button class="btn-export" onclick="clearMergeList()">✕ Xoá tất cả</button>
+            </div>
+
+            <!-- Result -->
+            <div class="merge-result" id="merge-result" style="display:none">
+              <video id="merge-preview" controls style="width:100%;border-radius:var(--radius);margin-bottom:12px"></video>
+              <a class="btn-export primary" id="merge-download" download>⬇ Tải về</a>
+            </div>
+
+          </div>
+        </div>
+      </div><!-- /page-merge -->
 
     </div><!-- /main-inner -->
   </main>
@@ -2105,7 +2193,10 @@ function showSceneDetail(idx) {
   detail.innerHTML = `
     <div class="scene-detail-header">
       <span class="scene-badge">◈ CẢNH ${sc.scene_number} · ${sc.type}</span>
-      <span style="font-size:11px;color:var(--text-dim)">${sc.duration}s · ${sc.camera_angle}</span>
+      <div style="display:flex;gap:6px;align-items:center">
+        <span style="font-size:11px;color:var(--text-dim)">${sc.duration}s · ${sc.camera_angle}</span>
+        <button class="btn-copy-brief" onclick="copySceneBrief(${idx})" title="Copy full brief cho director/AI">⧉ Copy Brief</button>
+      </div>
     </div>
     <div class="scene-fields">
       <div class="scene-field">
@@ -2147,6 +2238,46 @@ function showSceneDetail(idx) {
   document.querySelectorAll('.timeline-scene').forEach((el, i) => {
     el.classList.toggle('active', i === idx);
   });
+}
+
+// ─── COPY SCENE BRIEF ───────────────────────────────────────
+function copySceneBrief(idx) {
+  const sc = state.scenes[idx];
+  if (!sc) return;
+
+  // Build character detail block from state.characters
+  // Character detail: name + description if available
+  const charDetails = (sc.characters || []).map(cName => {
+    const found = (state.characters || []).find(c =>
+      c.name.toLowerCase() === cName.toLowerCase()
+    );
+    return found?.description ? `${cName} (${found.description})` : cName;
+  }).join(', ') || '(none)';
+
+  const productLine = state.product?.name
+    ? `Product: ${state.product.name}${state.product.desc ? ' — ' + state.product.desc : ''}`
+    : '';
+
+  // Prefix mỗi tên nhân vật bằng @ trong dòng Action
+  const actionTagged = (sc.characters || []).reduce(
+    (text, cName) => text.replace(new RegExp(`\\b${cName}\\b`, 'gi'), `@${cName}`),
+    sc.action
+  );
+
+  const parts = [
+    `Scene ${sc.scene_number} | ${sc.type} | ${sc.duration}s | ${state.ratio}`,
+    `Setting: ${sc.background}`,
+    `Camera: ${sc.camera_angle}`,
+    `Action: ${actionTagged}`,
+    `Expression: ${sc.expression}`,
+    productLine,
+    sc.dialogue ? `Voice: "${sc.dialogue}"` : '',
+  ].filter(l => l !== null && l !== undefined && l !== '');
+
+  const lines = parts.join('\n');
+
+  navigator.clipboard.writeText(lines);
+  notify(`✓ Đã copy brief cảnh ${sc.scene_number}!`);
 }
 
 // ─── RENDER STORYBOARD ──────────────────────────────────────
@@ -2294,6 +2425,167 @@ function copyAllPrompts() {
   const text = state.scenes.map((s,i) => `Scene ${i+1}: ${s.visual_description}`).join('\n\n');
   navigator.clipboard.writeText(text);
   notify(`Đã copy ${state.scenes.length} prompts!`);
+}
+
+// ─── SEQUENTIAL BATCH GENERATION ────────────────────────────
+async function generateBatchSequential() {
+  if (!state.scenes.length) { notify('Chưa có kịch bản!'); return; }
+
+  const btn = document.getElementById('btn-seq-gen');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Đang gen...'; }
+
+  // Build character map: character name (lowercase) → first ref image URL
+  const charMap = {};
+  (state.characters || []).forEach(ch => {
+    if (ch.name && ch.refs && ch.refs.length) {
+      const firstRef = ch.refs.find(r => r);
+      if (firstRef) charMap[ch.name.toLowerCase()] = firstRef;
+    }
+  });
+
+  const productUrl = state.product?.imageUrl || null;
+  if (!state.imageMap) state.imageMap = {};
+
+  let prevImageUrl = null;
+
+  for (let i = 0; i < state.scenes.length; i++) {
+    const sc = state.scenes[i];
+    if (btn) btn.textContent = `⏳ Cảnh ${i + 1}/${state.scenes.length}...`;
+    notify(`🎨 Đang gen cảnh ${sc.scene_number}/${state.scenes.length}...`);
+
+    // Pick character ref: match any character name in the scene's characters list
+    let charRefUrl = null;
+    if (sc.characters && sc.characters.length) {
+      for (const cName of sc.characters) {
+        const url = charMap[cName.toLowerCase()];
+        if (url) { charRefUrl = url; break; }
+      }
+    }
+    // Fallback: first character in global list
+    if (!charRefUrl && Object.keys(charMap).length) {
+      charRefUrl = Object.values(charMap)[0];
+    }
+
+    const body = {
+      prompt: sc.visual_description,
+      aspect_ratio: state.ratio,
+      scene_number: sc.scene_number,
+      product_image_url: productUrl,
+    };
+
+    if (i === 0) {
+      // Scene đầu: dùng ảnh nhân vật để lock khuôn mặt
+      if (charRefUrl) body.character_image_url = charRefUrl;
+    } else {
+      // Scene 2+: dùng ảnh cảnh trước để nối tiếp không gian
+      if (prevImageUrl) body.prev_scene_image_url = prevImageUrl;
+      else if (charRefUrl) body.character_image_url = charRefUrl;
+    }
+
+    try {
+      const resp = await fetch('/api/image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) {
+        const err = await resp.json();
+        notify(`Lỗi cảnh ${sc.scene_number}: ${err.detail || 'unknown'}`);
+        prevImageUrl = null;
+        continue;
+      }
+      const data = await resp.json();
+      state.imageMap[sc.scene_number] = data.image_url;
+      prevImageUrl = data.image_url;
+      saveState();
+      renderStoryboard();
+    } catch (err) {
+      notify(`Lỗi cảnh ${sc.scene_number}: ${err.message}`);
+      prevImageUrl = null;
+    }
+  }
+
+  if (btn) { btn.disabled = false; btn.textContent = '▶ Gen Tuần Tự'; }
+  notify(`✓ Hoàn tất gen ${state.scenes.length} cảnh!`);
+}
+
+// ─── MERGE VIDEO ─────────────────────────────────────────────
+let _mergeFiles = [];
+let _mergeDragIdx = null;
+
+function _mergeRender() {
+  const list = document.getElementById('merge-list');
+  const actions = document.getElementById('merge-actions');
+  if (!_mergeFiles.length) { list.innerHTML = ''; actions.style.display = 'none'; return; }
+  actions.style.display = 'flex';
+  list.innerHTML = _mergeFiles.map((f, i) => `
+    <div class="merge-item" draggable="true"
+         ondragstart="_mergeDragStart(${i})"
+         ondragover="event.preventDefault();_mergeDragOver(${i})"
+         ondrop="_mergeDrop(${i})"
+         ondragend="_mergeDragEnd()">
+      <div class="merge-item-num">${i + 1}</div>
+      <div class="merge-item-name" title="${f.name}">${f.name}</div>
+      <div class="merge-item-size">${(f.size / 1024 / 1024).toFixed(1)} MB</div>
+      <button class="merge-item-del" onclick="_mergeRemove(${i})">✕</button>
+    </div>`).join('');
+}
+
+function _mergeDragStart(i) { _mergeDragIdx = i; document.querySelectorAll('.merge-item')[i].classList.add('drag-ghost'); }
+function _mergeDragOver(i) {
+  if (_mergeDragIdx === null || _mergeDragIdx === i) return;
+  const arr = [..._mergeFiles];
+  const [item] = arr.splice(_mergeDragIdx, 1);
+  arr.splice(i, 0, item);
+  _mergeFiles = arr;
+  _mergeDragIdx = i;
+  _mergeRender();
+}
+function _mergeDrop(i) {}
+function _mergeDragEnd() { _mergeDragIdx = null; _mergeRender(); }
+function _mergeRemove(i) { _mergeFiles.splice(i, 1); _mergeRender(); }
+
+function onMergeFileSelect(e) {
+  _mergeFiles = [..._mergeFiles, ...Array.from(e.target.files)];
+  e.target.value = '';
+  _mergeRender();
+}
+
+function onMergeDrop(e) {
+  e.preventDefault();
+  document.getElementById('merge-dropzone').classList.remove('drag-over');
+  const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('video/'));
+  if (!files.length) { notify('Chỉ chấp nhận file video!'); return; }
+  _mergeFiles = [..._mergeFiles, ...files];
+  _mergeRender();
+}
+
+function clearMergeList() {
+  _mergeFiles = [];
+  _mergeRender();
+  document.getElementById('merge-result').style.display = 'none';
+}
+
+async function startMerge() {
+  if (_mergeFiles.length < 2) { notify('Cần ít nhất 2 video!'); return; }
+  notify(`⏳ Đang ghép ${_mergeFiles.length} video...`);
+  const form = new FormData();
+  _mergeFiles.forEach(f => form.append('files', f));
+  try {
+    const resp = await fetch('/api/merge-video', { method: 'POST', body: form });
+    if (!resp.ok) { const e = await resp.json(); throw new Error(e.detail || 'Lỗi ghép video'); }
+    const data = await resp.json();
+    const resultEl = document.getElementById('merge-result');
+    const preview = document.getElementById('merge-preview');
+    const dl = document.getElementById('merge-download');
+    preview.src = data.video_url + '?t=' + Date.now();
+    dl.href = data.video_url;
+    dl.download = 'merged_video.mp4';
+    resultEl.style.display = 'block';
+    notify(`✓ Ghép xong! ${data.duration}s — ${data.size_mb} MB`);
+  } catch (err) {
+    notify('Lỗi: ' + err.message);
+  }
 }
 
 // ─── OUTPUT ──────────────────────────────────────────────────

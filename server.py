@@ -37,12 +37,15 @@ from api.batch import router as batch_router
 from api.video import router as video_router
 from api.characters import router as characters_router
 from api.product import router as product_router
+from api.merge import router as merge_router
+
 app.include_router(script_router, prefix="/api")
 app.include_router(images_router, prefix="/api")
 app.include_router(batch_router, prefix="/api")
 app.include_router(video_router, prefix="/api")
 app.include_router(characters_router, prefix="/api")
 app.include_router(product_router, prefix="/api")
+app.include_router(merge_router, prefix="/api")
 
 from fastapi import Request
 from fastapi.responses import FileResponse, HTMLResponse

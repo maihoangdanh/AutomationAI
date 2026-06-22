@@ -42,7 +42,9 @@ class ImageRequest(BaseModel):
     prompt: str
     aspect_ratio: str = "9:16"
     scene_number: int = 1
-    product_image_url: Optional[str] = None  # nếu có → dùng redux cho cảnh SP
+    product_image_url: Optional[str] = None      # reference sản phẩm
+    character_image_url: Optional[str] = None    # ref nhân vật (scene đầu tiên)
+    prev_scene_image_url: Optional[str] = None   # ảnh cảnh trước (scene 2+, continuity)
 
 
 class ImageResponse(BaseModel):

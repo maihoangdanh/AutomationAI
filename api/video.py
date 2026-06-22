@@ -73,6 +73,7 @@ async def _gen_fal_kling(req: VideoRequest) -> str:
 @router.post("/video", response_model=VideoResponse)
 async def generate_video(req: VideoRequest):
     OUTPUT_VIDEOS.mkdir(parents=True, exist_ok=True)
+    print(f"[VIDEO] provider={req.provider!r}  model={req.model!r}  scene={req.scene_number}", flush=True)
 
     try:
         if req.provider == "fal":

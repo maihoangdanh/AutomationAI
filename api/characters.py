@@ -52,7 +52,8 @@ async def _gen_fal(full_prompt: str, model: str, seed: int, idx: int, char_name:
         )
         fal_url = result["images"][0]["url"]
 
-        filename = f"char_{char_name.lower().replace(' ','_')}_{idx}_{shot['label'].lower().replace(' ','_')}.jpg"
+        safe_label = shot['label'].lower().replace(' ','_').replace('/','_')
+        filename = f"char_{char_name.lower().replace(' ','_')}_{idx}_{safe_label}.jpg"
         local_path = CHARS_DIR / filename
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.get(fal_url)
@@ -86,7 +87,8 @@ async def _gen_imagen(full_prompt: str, model: str, seed: int, idx: int, char_na
         )
         img_data = response.generated_images[0].image.image_bytes
 
-        filename = f"char_{char_name.lower().replace(' ','_')}_{idx}_{shot['label'].lower().replace(' ','_')}.jpg"
+        safe_label = shot['label'].lower().replace(' ','_').replace('/','_')
+        filename = f"char_{char_name.lower().replace(' ','_')}_{idx}_{safe_label}.jpg"
         local_path = CHARS_DIR / filename
         local_path.write_bytes(img_data)
 

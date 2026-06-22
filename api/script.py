@@ -46,6 +46,18 @@ def _build_prompt(req: ScriptRequest) -> str:
         f"- {c['name']}: {c.get('desc', '')} | base_prompt: {c.get('prompt', 'Vietnamese woman, photorealistic')}"
         for c in req.characters
     ) if req.characters else ""
+
+    product_section = ""
+    if req.product:
+        p = req.product
+        parts = []
+        if p.name: parts.append(f"Tên SP: {p.name}")
+        if p.desc: parts.append(f"Mô tả SP: {p.desc}")
+        if p.imageUrl: parts.append(f"Ảnh SP: {p.imageUrl} (dùng để mô tả đúng màu sắc, hình dáng, bao bì SP trong visual_description)")
+        if parts:
+            product_section = "\nSẢN PHẨM:\n" + "\n".join(parts) + \
+                "\n→ Trong visual_description phải mô tả đúng sản phẩm này (màu sắc, hình dáng, tên thương hiệu nếu có).\n"
+
     return (
         f"{SYSTEM_PROMPT}\n\n"
         f"Ý tưởng: {req.idea}\n"
@@ -53,7 +65,8 @@ def _build_prompt(req: ScriptRequest) -> str:
         f"Thời lượng: {req.duration}s\n"
         f"Phong cách: {req.style}\n"
         f"Nhân vật: {chars}\n"
-        f"{char_detail}\n\n"
+        f"{char_detail}"
+        f"{product_section}\n"
         f"Tạo kịch bản phân cảnh hoàn chỉnh. Chỉ trả về JSON."
     )
 

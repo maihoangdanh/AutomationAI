@@ -1059,6 +1059,40 @@
           </div>
         </div>
 
+        <!-- PRODUCT UPLOAD -->
+        <div class="panel mt-12">
+          <div class="panel-header">
+            <div class="panel-title"><div class="dot"></div>SẢN PHẨM (TÙY CHỌN)</div>
+            <span class="text-dim" style="font-size:11px">AI dùng để viết cảnh & gen ảnh đúng SP</span>
+          </div>
+          <div class="panel-body">
+            <div style="display:flex;gap:12px;align-items:flex-start">
+              <!-- Ảnh upload -->
+              <div id="product-img-zone" onclick="uploadProductImage()"
+                style="width:100px;height:100px;flex-shrink:0;border:1px dashed var(--border);border-radius:8px;
+                       background:var(--bg-input);cursor:pointer;display:flex;flex-direction:column;
+                       align-items:center;justify-content:center;gap:4px;overflow:hidden;position:relative;transition:border-color 0.15s"
+                onmouseover="this.style.borderColor='var(--gold-dim)'" onmouseout="this.style.borderColor='var(--border)'">
+                <span id="product-img-placeholder" style="font-size:22px;color:var(--text-muted)">📦</span>
+                <span style="font-size:9px;color:var(--text-dim)" id="product-img-hint">Upload ảnh SP</span>
+                <img id="product-img-preview" src="" style="display:none;position:absolute;inset:0;width:100%;height:100%;object-fit:cover" />
+                <button id="product-img-remove" onclick="event.stopPropagation();removeProductImage()"
+                  style="display:none;position:absolute;top:3px;right:3px;background:rgba(0,0,0,0.7);
+                         border:1px solid var(--border);color:var(--text);border-radius:3px;
+                         font-size:9px;padding:1px 5px;cursor:pointer">✕</button>
+              </div>
+              <!-- Tên + mô tả -->
+              <div style="flex:1;display:flex;flex-direction:column;gap:8px">
+                <input class="form-input" id="product-name" placeholder="Tên sản phẩm (VD: Trioderma Acne Serum)"
+                  oninput="state.product.name=this.value;saveState()" />
+                <textarea class="form-textarea" id="product-desc" rows="3"
+                  placeholder="Mô tả sản phẩm (VD: Serum trị mụn màu trắng, chai thủy tinh 30ml, nắp vàng, logo xanh mint...)"
+                  oninput="state.product.desc=this.value;saveState()"></textarea>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div><!-- /page-idea -->
 
       <!-- PAGE: Nhân vật -->
@@ -1236,7 +1270,8 @@ const state = {
   sbCols: 2,
   imageMap: {},
   videoMap: {},
-  scriptLibrary: []   // [{id, name, concept, idea, scenes, createdAt}]
+  scriptLibrary: [],  // [{id, name, concept, idea, scenes, createdAt}]
+  product: { name: '', desc: '', imageUrl: null }
 };
 
 // ─── SCENE LABELS ───────────────────────────────────────────
@@ -1684,6 +1719,56 @@ function renderCharacters() {
   }).join('');
 }
 
+// ─── PRODUCT ─────────────────────────────────────────────────
+function uploadProductImage() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/jpeg,image/png,image/webp';
+  input.onchange = async () => {
+    const file = input.files[0];
+    if (!file) return;
+    notify('⬆ Đang upload ảnh sản phẩm...');
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const resp = await fetch('/api/product/upload-image', { method: 'POST', body: fd });
+      if (!resp.ok) throw new Error((await resp.json()).detail);
+      const data = await resp.json();
+      state.product.imageUrl = data.image_url;
+      saveState();
+      _renderProductImage();
+      notify('✓ Upload ảnh sản phẩm thành công');
+    } catch(e) { notify('Lỗi upload: ' + e.message); }
+  };
+  input.click();
+}
+
+function removeProductImage() {
+  state.product.imageUrl = null;
+  saveState();
+  _renderProductImage();
+}
+
+function _renderProductImage() {
+  const preview = document.getElementById('product-img-preview');
+  const placeholder = document.getElementById('product-img-placeholder');
+  const hint = document.getElementById('product-img-hint');
+  const removeBtn = document.getElementById('product-img-remove');
+  if (!preview) return;
+  if (state.product.imageUrl) {
+    preview.src = state.product.imageUrl;
+    preview.style.display = '';
+    placeholder.style.display = 'none';
+    hint.style.display = 'none';
+    removeBtn.style.display = '';
+  } else {
+    preview.style.display = 'none';
+    placeholder.style.display = '';
+    hint.style.display = '';
+    removeBtn.style.display = 'none';
+  }
+}
+
 // ─── SCRIPT LIBRARY ─────────────────────────────────────────
 function saveScriptToLibrary() {
   if (!state.scenes.length) { notify('Chưa có kịch bản để lưu'); return; }
@@ -1802,7 +1887,8 @@ async function generateScript() {
         aspect_ratio: state.ratio,
         duration: state.duration,
         style: state.style,
-        characters: state.characters
+        characters: state.characters,
+        product: (state.product.name || state.product.desc || state.product.imageUrl) ? state.product : null
       })
     });
     if (!scriptResp.ok) {
@@ -2253,7 +2339,7 @@ function resetAll() {
 const STORAGE_KEY = 'aistudio_state_v1';
 
 // Những field cần lưu (bỏ qua imageMap/videoMap vì URL /output/ còn phụ thuộc server)
-const PERSIST_FIELDS = ['idea', 'ratio', 'duration', 'style', 'characters', 'scenes', 'imageMap', 'videoMap', 'sbCols', 'scriptLibrary'];
+const PERSIST_FIELDS = ['idea', 'ratio', 'duration', 'style', 'characters', 'scenes', 'imageMap', 'videoMap', 'sbCols', 'scriptLibrary', 'product'];
 
 function saveState() {
   try {
@@ -2294,6 +2380,12 @@ if (state.idea) {
   document.getElementById('idea-input').value = state.idea;
 }
 renderScriptLibrary();
+// Restore product fields
+if (state.product) {
+  if (state.product.name) document.getElementById('product-name').value = state.product.name;
+  if (state.product.desc) document.getElementById('product-desc').value = state.product.desc;
+  _renderProductImage();
+}
 // Restore pill selections
 document.querySelectorAll('#ratio-group .pill').forEach(p => {
   p.classList.toggle('selected', p.dataset.val === state.ratio);

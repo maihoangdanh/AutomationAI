@@ -2,12 +2,19 @@ from pydantic import BaseModel
 from typing import Optional
 
 
+class ProductInfo(BaseModel):
+    name: str = ""
+    desc: str = ""
+    imageUrl: Optional[str] = None
+
+
 class ScriptRequest(BaseModel):
     idea: str
     aspect_ratio: str = "9:16"
     duration: int = 30
     style: str = "dark luxury"
     characters: list[dict] = []
+    product: Optional[ProductInfo] = None
 
 
 class SceneOut(BaseModel):

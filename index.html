@@ -461,6 +461,34 @@
   .char-model-select:focus { outline: none; border-color: var(--gold-dim); }
   .char-model-select option { background: #1a1a1a; color: #e0e0e0; }
 
+  /* ─── SCRIPT LIBRARY ───────────────────────────────────── */
+  .script-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: border-color 0.15s;
+  }
+  .script-card:hover { border-color: var(--gold-dim); }
+  .script-card-info { flex: 1; min-width: 0; }
+  .script-card-name {
+    font-size: 13px; font-weight: 600; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .script-card-meta { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+  .script-card-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .btn-storyboard {
+    background: rgba(201,168,76,0.12); border: 1px solid var(--gold-dim);
+    color: var(--gold); border-radius: 5px; padding: 4px 10px;
+    font-size: 11px; cursor: pointer; white-space: nowrap;
+    transition: all 0.15s;
+  }
+  .btn-storyboard:hover { background: rgba(201,168,76,0.25); border-color: var(--gold); }
+
   /* ─── REF SLOTS trong panel add/edit ───────────────────── */
   .ref-slots-grid {
     display: grid;
@@ -1097,7 +1125,10 @@
         <div class="panel">
           <div class="panel-header">
             <div class="panel-title"><div class="dot"></div>TIMELINE PHÂN CẢNH</div>
-            <span class="text-dim" style="font-size:11px" id="timeline-info">0 cảnh · 0s</span>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="text-dim" style="font-size:11px" id="timeline-info">0 cảnh · 0s</span>
+              <button class="btn-sm" onclick="saveScriptToLibrary()" id="btn-save-script" style="display:none">💾 Lưu kịch bản</button>
+            </div>
           </div>
           <div class="panel-body">
             <div class="empty-state" id="timeline-empty">
@@ -1111,6 +1142,22 @@
               </div>
               <div class="scene-detail mt-12" id="scene-detail"></div>
             </div>
+          </div>
+        </div>
+
+        <!-- Script Library -->
+        <div class="panel mt-12" id="script-library-panel">
+          <div class="panel-header">
+            <div class="panel-title"><div class="dot"></div>THƯ VIỆN KỊCH BẢN</div>
+            <span class="text-dim" style="font-size:11px" id="script-lib-count">0 kịch bản</span>
+          </div>
+          <div class="panel-body">
+            <div class="empty-state" id="script-lib-empty" style="padding:24px 0">
+              <div class="empty-icon" style="font-size:24px">📋</div>
+              <div class="empty-title">Chưa có kịch bản nào</div>
+              <div class="empty-sub">Generate script rồi nhấn 💾 Lưu kịch bản để lưu vào đây</div>
+            </div>
+            <div id="script-lib-list"></div>
           </div>
         </div>
       </div><!-- /page-timeline -->
@@ -1188,7 +1235,8 @@ const state = {
   activeScene: null,
   sbCols: 2,
   imageMap: {},
-  videoMap: {}
+  videoMap: {},
+  scriptLibrary: []   // [{id, name, concept, idea, scenes, createdAt}]
 };
 
 // ─── SCENE LABELS ───────────────────────────────────────────
@@ -1636,6 +1684,98 @@ function renderCharacters() {
   }).join('');
 }
 
+// ─── SCRIPT LIBRARY ─────────────────────────────────────────
+function saveScriptToLibrary() {
+  if (!state.scenes.length) { notify('Chưa có kịch bản để lưu'); return; }
+  const defaultName = state.idea ? state.idea.slice(0, 40) : `Kịch bản ${state.scriptLibrary.length + 1}`;
+  const name = prompt('Đặt tên cho kịch bản:', defaultName);
+  if (!name) return;
+
+  const entry = {
+    id: Date.now(),
+    name: name.trim(),
+    idea: state.idea,
+    scenes: JSON.parse(JSON.stringify(state.scenes)),
+    sceneCount: state.scenes.length,
+    duration: state.scenes.reduce((s, sc) => s + (sc.duration || 0), 0),
+    createdAt: new Date().toLocaleDateString('vi-VN'),
+  };
+  state.scriptLibrary.unshift(entry);
+  saveState();
+  renderScriptLibrary();
+  notify(`✓ Đã lưu kịch bản "${name}"`);
+}
+
+function deleteScriptFromLibrary(id) {
+  const entry = state.scriptLibrary.find(s => s.id === id);
+  if (!entry) return;
+  if (!confirm(`Xóa kịch bản "${entry.name}"?`)) return;
+  state.scriptLibrary = state.scriptLibrary.filter(s => s.id !== id);
+  saveState();
+  renderScriptLibrary();
+  notify('Đã xóa kịch bản');
+}
+
+function loadScriptFromLibrary(id) {
+  const entry = state.scriptLibrary.find(s => s.id === id);
+  if (!entry) return;
+  if (state.scenes.length && !confirm(`Load kịch bản "${entry.name}"? Kịch bản hiện tại sẽ bị thay thế (lưu trước nếu cần).`)) return;
+  state.scenes = JSON.parse(JSON.stringify(entry.scenes));
+  state.idea = entry.idea || state.idea;
+  state.imageMap = {};
+  state.videoMap = {};
+  saveState();
+  renderTimeline();
+  renderStoryboard();
+  document.getElementById('scene-count').textContent = state.scenes.length;
+  if (state.idea) document.getElementById('idea-input').value = state.idea;
+  updateStatus();
+  notify(`✓ Đã load kịch bản "${entry.name}"`);
+}
+
+function pushScriptToStoryboard(id) {
+  const entry = state.scriptLibrary.find(s => s.id === id);
+  if (!entry) return;
+  state.scenes = JSON.parse(JSON.stringify(entry.scenes));
+  state.idea = entry.idea || state.idea;
+  state.imageMap = {};
+  state.videoMap = {};
+  saveState();
+  renderTimeline();
+  renderStoryboard();
+  document.getElementById('scene-count').textContent = state.scenes.length;
+  updateStatus();
+  switchPage('storyboard');
+  notify(`✓ Đã đẩy "${entry.name}" → Storyboard`);
+}
+
+function renderScriptLibrary() {
+  const lib = state.scriptLibrary;
+  const empty = document.getElementById('script-lib-empty');
+  const list  = document.getElementById('script-lib-list');
+  const count = document.getElementById('script-lib-count');
+  if (!empty || !list) return;
+  count.textContent = `${lib.length} kịch bản`;
+  if (!lib.length) {
+    empty.style.display = '';
+    list.innerHTML = '';
+    return;
+  }
+  empty.style.display = 'none';
+  list.innerHTML = lib.map(s => `
+    <div class="script-card">
+      <div class="script-card-info">
+        <div class="script-card-name" title="${s.name}">${s.name}</div>
+        <div class="script-card-meta">${s.sceneCount} cảnh · ${s.duration}s · ${s.createdAt}</div>
+      </div>
+      <div class="script-card-actions">
+        <button class="btn-sm" onclick="loadScriptFromLibrary(${s.id})" title="Load vào Timeline">↺ Load</button>
+        <button class="btn-storyboard" onclick="pushScriptToStoryboard(${s.id})">→ Storyboard</button>
+        <button class="btn-sm" onclick="deleteScriptFromLibrary(${s.id})" title="Xóa">✕</button>
+      </div>
+    </div>`).join('');
+}
+
 // ─── SCRIPT GENERATION ──────────────────────────────────────
 async function generateScript() {
   const idea = document.getElementById('idea-input').value.trim();
@@ -1835,13 +1975,16 @@ function renderTimeline() {
   const content = document.getElementById('timeline-content');
   const info = document.getElementById('timeline-info');
 
+  const saveBtn = document.getElementById('btn-save-script');
   if (!state.scenes.length) {
     empty.style.display = '';
     content.style.display = 'none';
+    if (saveBtn) saveBtn.style.display = 'none';
     return;
   }
   empty.style.display = 'none';
   content.style.display = '';
+  if (saveBtn) saveBtn.style.display = '';
 
   const total = state.scenes.reduce((s, sc) => s + sc.duration, 0);
   info.textContent = `${state.scenes.length} cảnh · ${total}s`;
@@ -2110,7 +2253,7 @@ function resetAll() {
 const STORAGE_KEY = 'aistudio_state_v1';
 
 // Những field cần lưu (bỏ qua imageMap/videoMap vì URL /output/ còn phụ thuộc server)
-const PERSIST_FIELDS = ['idea', 'ratio', 'duration', 'style', 'characters', 'scenes', 'imageMap', 'videoMap', 'sbCols'];
+const PERSIST_FIELDS = ['idea', 'ratio', 'duration', 'style', 'characters', 'scenes', 'imageMap', 'videoMap', 'sbCols', 'scriptLibrary'];
 
 function saveState() {
   try {
@@ -2150,6 +2293,7 @@ if (state.characters.length) {
 if (state.idea) {
   document.getElementById('idea-input').value = state.idea;
 }
+renderScriptLibrary();
 // Restore pill selections
 document.querySelectorAll('#ratio-group .pill').forEach(p => {
   p.classList.toggle('selected', p.dataset.val === state.ratio);

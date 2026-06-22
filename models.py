@@ -42,6 +42,7 @@ class ImageRequest(BaseModel):
     prompt: str
     aspect_ratio: str = "9:16"
     scene_number: int = 1
+    product_image_url: Optional[str] = None  # nếu có → dùng redux cho cảnh SP
 
 
 class ImageResponse(BaseModel):
@@ -53,6 +54,7 @@ class ImageResponse(BaseModel):
 class BatchRequest(BaseModel):
     scenes: list[SceneOut]
     aspect_ratio: str = "9:16"
+    product_image_url: Optional[str] = None  # truyền xuống từng scene
 
 
 class BatchResponse(BaseModel):

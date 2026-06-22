@@ -1907,7 +1907,8 @@ async function generateScript() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         scenes: state.scenes,
-        aspect_ratio: state.ratio
+        aspect_ratio: state.ratio,
+        product_image_url: state.product?.imageUrl || null
       })
     });
     if (batchResp.ok) {

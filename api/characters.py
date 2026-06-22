@@ -34,6 +34,15 @@ class CharacterRefResponse(BaseModel):
     name: str
     refs: list[dict]          # [{label, image_url, angle}]
 
+class RetryRefRequest(BaseModel):
+    name: str
+    base_prompt: str
+    style: str = "photorealistic, studio lighting, white background, 8k, sharp focus"
+    seed: int = 42            # Phải dùng đúng seed gốc để face nhất quán
+    angle_idx: int            # 0–5, index trong ANGLE_SHOTS
+    provider: str = "fal"
+    model: str = "fal-ai/flux/dev"
+
 
 async def _gen_fal(full_prompt: str, model: str, seed: int, idx: int, char_name: str, shot: dict) -> dict:
     """Generate 1 ảnh qua FAL.ai."""
@@ -110,6 +119,28 @@ async def _generate_one_ref(base: str, shot: dict, style: str, seed: int, char_n
         return await _gen_imagen(full_prompt, model, seed, idx, char_name, shot)
     else:
         return await _gen_fal(full_prompt, model, seed, idx, char_name, shot)
+
+
+@router.post("/character/retry-ref")
+async def retry_character_ref(req: RetryRefRequest):
+    """Retry 1 ảnh lỗi, dùng đúng seed gốc để giữ nhất quán khuôn mặt."""
+    if req.provider == "fal":
+        if not os.getenv("FAL_KEY"):
+            raise HTTPException(500, "FAL_KEY chưa được cấu hình trong .env")
+    elif req.provider == "google":
+        if not os.getenv("GOOGLE_API_KEY"):
+            raise HTTPException(500, "GOOGLE_API_KEY chưa được cấu hình trong .env")
+
+    if req.angle_idx < 0 or req.angle_idx >= len(ANGLE_SHOTS):
+        raise HTTPException(400, f"angle_idx phải từ 0 đến {len(ANGLE_SHOTS)-1}")
+
+    CHARS_DIR.mkdir(parents=True, exist_ok=True)
+    shot = ANGLE_SHOTS[req.angle_idx]
+    result = await _generate_one_ref(
+        req.base_prompt, shot, req.style, req.seed, req.name, req.angle_idx,
+        provider=req.provider, model=req.model
+    )
+    return result
 
 
 @router.post("/character/generate-refs", response_model=CharacterRefResponse)

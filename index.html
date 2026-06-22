@@ -1298,6 +1298,50 @@ function onCharModelChange(idx) {
   saveState();
 }
 
+async function retryCharacterRef(charIdx, refIdx) {
+  const c = state.characters[charIdx];
+  if (!c.refSeed) { notify('Không tìm thấy seed gốc — hãy Generate lại toàn bộ'); return; }
+
+  const basePrompt = c.prompt || `${c.desc}, ${c.age ? c.age + ' years old,' : ''} photorealistic`;
+  const provider = c.imageProvider || 'fal';
+  const model = c.imageModel || 'fal-ai/flux/dev';
+
+  // Đánh dấu loading chỉ ảnh đó
+  state.characters[charIdx].refs[refIdx] = { loading: true };
+  renderCharacters();
+  notify(`↻ Đang retry ảnh ${refIdx + 1}/6 cho ${c.name}...`);
+
+  try {
+    const resp = await fetch('/api/character/retry-ref', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: c.name,
+        base_prompt: basePrompt,
+        style: 'photorealistic, studio lighting, high quality, 8k, sharp focus',
+        seed: c.refSeed,
+        angle_idx: refIdx,
+        provider: provider,
+        model: model
+      })
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.detail || 'Retry failed');
+    }
+    const data = await resp.json();
+    state.characters[charIdx].refs[refIdx] = data;
+    if (data.image_url && !c.avatarUrl) state.characters[charIdx].avatarUrl = data.image_url;
+    saveState();
+    renderCharacters();
+    notify(data.image_url ? `✓ Retry thành công ảnh góc "${data.label}"` : `✕ Retry thất bại: ${data.error}`);
+  } catch (err) {
+    state.characters[charIdx].refs[refIdx] = { label: '', angle: '', image_url: null, error: err.message };
+    renderCharacters();
+    notify('Lỗi retry: ' + err.message);
+  }
+}
+
 async function generateCharacterRefs(idx) {
   const c = state.characters[idx];
   if (!c.prompt && !c.desc) { notify('Nhân vật cần có mô tả hoặc base prompt'); return; }
@@ -1319,7 +1363,7 @@ async function generateCharacterRefs(idx) {
         name: c.name,
         base_prompt: basePrompt,
         style: 'photorealistic, studio lighting, high quality, 8k, sharp focus',
-        seed: Math.floor(Math.random() * 9000) + 1000,
+        seed: c.refSeed || (state.characters[idx].refSeed = Math.floor(Math.random() * 9000) + 1000),
         provider: provider,
         model: model
       })
@@ -1361,9 +1405,9 @@ function renderCharacters() {
     // Reference sheet
     let refsHtml = '';
     if (c.refs && c.refs.length > 0) {
-      refsHtml = `<div class="char-refs">` + c.refs.map(r => {
+      refsHtml = `<div class="char-refs">` + c.refs.map((r, ri) => {
         if (r.loading) return `<div class="char-ref-item"><div class="char-ref-placeholder"><div class="spin"></div></div></div>`;
-        if (!r.image_url) return `<div class="char-ref-item"><div class="char-ref-placeholder" style="font-size:9px;color:var(--accent-red)" title="${r.error||''}">✕<br>${(r.error||'').substring(0,40)}</div></div>`;
+        if (!r.image_url) return `<div class="char-ref-item"><div class="char-ref-placeholder" style="font-size:9px;color:var(--accent-red);cursor:pointer" title="${r.error||''}" onclick="retryCharacterRef(${i},${ri})">↻<br><span style="font-size:8px">${(r.error||'').substring(0,30)}</span></div></div>`;
         return `<div class="char-ref-item" onclick="window.open('${r.image_url}','_blank')">
           <img src="${r.image_url}" loading="lazy" />
           <div class="char-ref-label">${r.label}</div>

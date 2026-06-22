@@ -461,6 +461,47 @@
   .char-model-select:focus { outline: none; border-color: var(--gold-dim); }
   .char-model-select option { background: #1a1a1a; color: #e0e0e0; }
 
+  /* ─── REF SLOTS trong panel add/edit ───────────────────── */
+  .ref-slots-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-top: 6px;
+  }
+  .ref-slot {
+    position: relative;
+    aspect-ratio: 1;
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    cursor: pointer;
+    background: var(--bg-input);
+    transition: border-color 0.15s;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 4px;
+  }
+  .ref-slot:hover { border-color: var(--gold-dim); }
+  .ref-slot.has-image { border-style: solid; border-color: var(--gold-dim); }
+  .ref-slot img { width: 100%; height: 100%; object-fit: cover; position: absolute; inset: 0; }
+  .ref-slot-label {
+    font-size: 9px; color: var(--text-dim); text-transform: uppercase;
+    letter-spacing: 0.5px; z-index: 1; pointer-events: none;
+  }
+  .ref-slot-icon { font-size: 16px; color: var(--text-muted); z-index: 1; }
+  .ref-slot-overlay {
+    display: none; position: absolute; inset: 0; z-index: 2;
+    background: rgba(0,0,0,0.6);
+    align-items: center; justify-content: center; gap: 8px;
+  }
+  .ref-slot.has-image:hover .ref-slot-overlay { display: flex; }
+  .ref-slot-overlay button {
+    background: rgba(0,0,0,0.7); border: 1px solid var(--border);
+    color: var(--text); border-radius: 4px; padding: 3px 8px;
+    font-size: 10px; cursor: pointer;
+  }
+  .ref-slot-overlay button:hover { border-color: var(--gold); color: var(--gold); }
+
   /* ─── UPLOAD OVERLAY trên ref slot ─────────────────────── */
   .char-ref-item { position: relative; }
   .char-ref-upload-btn {
@@ -1035,9 +1076,17 @@
               <label class="form-label">Base Prompt AI (tùy chọn)</label>
               <textarea class="form-textarea" id="char-prompt" placeholder="VD: Vietnamese woman, 25 years old, oval face, long dark hair, slim figure, photorealistic..." rows="2"></textarea>
             </div>
+            <!-- 6 slot upload ref -->
+            <div class="form-group mt-12">
+              <label class="form-label">Ảnh tham chiếu (tùy chọn — upload sẵn để AI gen nhất quán)</label>
+              <div class="ref-slots-grid" id="ref-slots-grid"></div>
+              <div style="font-size:10px;color:var(--text-dim);margin-top:6px">
+                Upload 1+ ảnh → AI dùng làm reference cho các góc trống · Không upload → gen toàn bộ từ mô tả
+              </div>
+            </div>
             <div class="mt-8 flex-between">
               <button class="btn-export" onclick="closeAddCharacter()">Hủy</button>
-              <button class="btn-export primary" onclick="addCharacter()">Thêm nhân vật</button>
+              <button class="btn-export primary" onclick="addCharacter()">Lưu nhân vật</button>
             </div>
           </div>
         </div>
@@ -1219,10 +1268,68 @@ function setDuration(v) {
 // ─── CHARACTER MANAGEMENT ───────────────────────────────────
 let _editingIdx = null;
 
+const ANGLE_LABELS = ['Front','3/4 Left','3/4 Right','Side Profile','Smile','Dynamic'];
+let _pendingRefs = Array(6).fill(null); // {image_url, label} hoặc null
+
+function _renderRefSlots() {
+  const grid = document.getElementById('ref-slots-grid');
+  if (!grid) return;
+  grid.innerHTML = ANGLE_LABELS.map((label, i) => {
+    const ref = _pendingRefs[i];
+    if (ref) {
+      return `<div class="ref-slot has-image" onclick="uploadPendingRef(${i})">
+        <img src="${ref.image_url}" />
+        <div class="ref-slot-overlay">
+          <button onclick="event.stopPropagation();uploadPendingRef(${i})">↺ Đổi</button>
+          <button onclick="event.stopPropagation();removePendingRef(${i})">✕ Xóa</button>
+        </div>
+        <div class="ref-slot-label" style="position:absolute;bottom:4px;left:0;right:0;text-align:center;background:rgba(0,0,0,0.6);padding:2px">${label}</div>
+      </div>`;
+    }
+    return `<div class="ref-slot" onclick="uploadPendingRef(${i})">
+      <div class="ref-slot-icon">+</div>
+      <div class="ref-slot-label">${label}</div>
+    </div>`;
+  }).join('');
+}
+
+function uploadPendingRef(slotIdx) {
+  const nameEl = document.getElementById('char-name');
+  const charName = nameEl.value.trim() || '_tmp';
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/jpeg,image/png,image/webp';
+  input.onchange = async () => {
+    const file = input.files[0];
+    if (!file) return;
+    notify(`⬆ Đang upload ảnh "${ANGLE_LABELS[slotIdx]}"...`);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('char_name', charName);
+      fd.append('angle_idx', slotIdx);
+      const resp = await fetch('/api/character/upload-ref', { method: 'POST', body: fd });
+      if (!resp.ok) throw new Error((await resp.json()).detail);
+      const data = await resp.json();
+      _pendingRefs[slotIdx] = data;
+      _renderRefSlots();
+      notify(`✓ Upload "${ANGLE_LABELS[slotIdx]}" thành công`);
+    } catch(e) { notify('Lỗi upload: ' + e.message); }
+  };
+  input.click();
+}
+
+function removePendingRef(slotIdx) {
+  _pendingRefs[slotIdx] = null;
+  _renderRefSlots();
+}
+
 function openAddCharacter() {
   _editingIdx = null;
+  _pendingRefs = Array(6).fill(null);
   ['char-name','char-age','char-desc','char-prompt'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('add-char-panel').style.display = '';
+  _renderRefSlots();
 }
 
 function openEditCharacter(idx) {
@@ -1232,12 +1339,19 @@ function openEditCharacter(idx) {
   document.getElementById('char-age').value = c.age || '';
   document.getElementById('char-desc').value = c.desc || '';
   document.getElementById('char-prompt').value = c.prompt || '';
+  // Load refs hiện tại vào pending slots
+  _pendingRefs = Array(6).fill(null);
+  if (c.refs && c.refs.length) {
+    c.refs.forEach((r, i) => { if (r && r.image_url) _pendingRefs[i] = r; });
+  }
   document.getElementById('add-char-panel').style.display = '';
+  _renderRefSlots();
   notify(`Chỉnh sửa nhân vật: ${c.name}`);
 }
 
 function closeAddCharacter() {
   _editingIdx = null;
+  _pendingRefs = Array(6).fill(null);
   document.getElementById('add-char-panel').style.display = 'none';
   ['char-name','char-age','char-desc','char-prompt'].forEach(id =>
     document.getElementById(id).value = '');
@@ -1245,22 +1359,28 @@ function closeAddCharacter() {
 
 function addCharacter() {
   const name = document.getElementById('char-name').value.trim();
-  const age = document.getElementById('char-age').value.trim();
+  const age  = document.getElementById('char-age').value.trim();
   const desc = document.getElementById('char-desc').value.trim();
   const prompt = document.getElementById('char-prompt').value.trim();
   if (!name) { notify('Vui lòng nhập tên nhân vật'); return; }
 
+  // Chuyển _pendingRefs thành refs array (slot null → {image_url:null})
+  const refs = _pendingRefs.map((r, i) => r || {
+    label: ANGLE_LABELS[i], angle: '', image_url: null
+  });
+  const hasAnyRef = _pendingRefs.some(r => r);
+
   if (_editingIdx !== null) {
-    // Edit mode — giữ refs cũ
     const existing = state.characters[_editingIdx];
-    state.characters[_editingIdx] = { ...existing, name, age, desc, prompt };
+    state.characters[_editingIdx] = { ...existing, name, age, desc, prompt, refs };
     notify(`Đã cập nhật nhân vật: ${name}`);
   } else {
-    state.characters.push({ name, age, desc, prompt, refs: [] });
+    state.characters.push({ name, age, desc, prompt, refs });
     notify(`Đã thêm nhân vật: ${name}`);
   }
 
   closeAddCharacter();
+  saveState();
   renderCharacters();
   updateStatus();
 }
@@ -1416,7 +1536,8 @@ async function generateCharacterRefs(idx) {
         style: 'photorealistic, studio lighting, high quality, 8k, sharp focus',
         seed: c.refSeed || (state.characters[idx].refSeed = Math.floor(Math.random() * 9000) + 1000),
         provider: provider,
-        model: model
+        model: model,
+        existing_refs: (c.refs || []).map(r => (r && r.image_url) ? r.image_url : null)
       })
     });
     if (!resp.ok) {
@@ -1471,8 +1592,14 @@ function renderCharacters() {
       }).join('') + `</div>`;
     }
 
+    const filledCount = (c.refs || []).filter(r => r && r.image_url).length;
+    const missingCount = 6 - filledCount;
     const hasRefs = c.refs && c.refs.length > 0 && !c.refs[0].loading;
-    const genBtnLabel = hasRefs ? '↻ Regenerate Refs' : '✦ Generate Reference Sheet (6 góc)';
+    const genBtnLabel = !hasRefs
+      ? '✦ Generate Reference Sheet (6 góc)'
+      : missingCount > 0
+        ? `✦ Generate ${missingCount} góc còn thiếu`
+        : '↻ Regenerate All';
 
     return `
     <div class="character-card">

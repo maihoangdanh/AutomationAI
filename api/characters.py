@@ -5,6 +5,7 @@ import httpx
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
+from typing import Optional
 from google import genai
 from google.genai import types as gtypes
 
@@ -12,136 +13,128 @@ router = APIRouter()
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "./output"))
 CHARS_DIR = OUTPUT_DIR / "characters"
 
-# 6 góc chuẩn cho reference sheet
 ANGLE_SHOTS = [
-    {"label": "Front",       "angle": "front view, looking straight at camera, neutral expression"},
-    {"label": "3/4 Left",    "angle": "3/4 angle left, slight turn, natural expression"},
-    {"label": "3/4 Right",   "angle": "3/4 angle right, slight turn, confident expression"},
-    {"label": "Side Profile","angle": "side profile view, looking left, clean jawline visible"},
-    {"label": "Smile",       "angle": "front view, warm genuine smile, eyes slightly squinted"},
-    {"label": "Dynamic",     "angle": "slight downward angle, looking up at camera, powerful pose"},
+    {"label": "Front",        "angle": "front view, looking straight at camera, neutral expression"},
+    {"label": "3/4 Left",     "angle": "3/4 angle left, slight turn, natural expression"},
+    {"label": "3/4 Right",    "angle": "3/4 angle right, slight turn, confident expression"},
+    {"label": "Side Profile", "angle": "side profile view, looking left, clean jawline visible"},
+    {"label": "Smile",        "angle": "front view, warm genuine smile, eyes slightly squinted"},
+    {"label": "Dynamic",      "angle": "slight downward angle, looking up at camera, powerful pose"},
 ]
+
 
 class CharacterRefRequest(BaseModel):
     name: str
-    base_prompt: str          # VD: "Vietnamese girl, 18, oval face, long black hair"
+    base_prompt: str
     style: str = "photorealistic, studio lighting, white background, 8k, sharp focus"
-    seed: int = 42            # Cùng seed → nhất quán khuôn mặt
-    provider: str = "fal"    # "fal" | "google"
+    seed: int = 42
+    provider: str = "fal"
     model: str = "fal-ai/flux/dev"
+    # existing_refs: slot nào đã có image_url thì skip, None thì generate
+    # list 6 phần tử, mỗi phần tử là image_url (str) hoặc None
+    existing_refs: list[Optional[str]] = []
 
-class CharacterRefResponse(BaseModel):
-    name: str
-    refs: list[dict]          # [{label, image_url, angle}]
 
 class RetryRefRequest(BaseModel):
     name: str
     base_prompt: str
     style: str = "photorealistic, studio lighting, white background, 8k, sharp focus"
-    seed: int = 42            # Phải dùng đúng seed gốc để face nhất quán
-    angle_idx: int            # 0–5, index trong ANGLE_SHOTS
+    seed: int = 42
+    angle_idx: int
     provider: str = "fal"
     model: str = "fal-ai/flux/dev"
+    reference_image_url: Optional[str] = None
 
 
-async def _gen_fal(full_prompt: str, model: str, seed: int, idx: int, char_name: str, shot: dict) -> dict:
-    """Generate 1 ảnh qua FAL.ai."""
+class CharacterRefResponse(BaseModel):
+    name: str
+    refs: list[dict]
+
+
+def _safe_filename(char_name: str, idx: int, label: str, ext: str = "jpg") -> str:
+    safe_name = char_name.lower().replace(' ', '_')
+    safe_label = label.lower().replace(' ', '_').replace('/', '_')
+    return f"char_{safe_name}_{idx}_{safe_label}.{ext}"
+
+
+async def _save_from_url(fal_url: str, local_path: Path):
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.get(fal_url)
+        resp.raise_for_status()
+        local_path.write_bytes(resp.content)
+
+
+async def _gen_fal(full_prompt: str, model: str, seed: int, idx: int,
+                   char_name: str, shot: dict,
+                   reference_image_url: str = None) -> dict:
     try:
-        result = await fal_client.run_async(
-            model,
-            arguments={
-                "prompt": full_prompt,
-                "image_size": "square_hd",
-                "num_inference_steps": 28,
-                "guidance_scale": 3.5,
-                "num_images": 1,
-                "seed": seed + idx,
-                "enable_safety_checker": True
-            }
-        )
+        if reference_image_url:
+            # Dùng redux để giữ nhất quán khuôn mặt từ ảnh reference
+            result = await fal_client.run_async(
+                "fal-ai/flux-pro/v1/redux",
+                arguments={
+                    "image_url": reference_image_url,
+                    "prompt": full_prompt,
+                    "image_size": "square_hd",
+                    "num_inference_steps": 28,
+                    "guidance_scale": 3.5,
+                    "seed": seed + idx,
+                }
+            )
+        else:
+            result = await fal_client.run_async(
+                model,
+                arguments={
+                    "prompt": full_prompt,
+                    "image_size": "square_hd",
+                    "num_inference_steps": 28,
+                    "guidance_scale": 3.5,
+                    "num_images": 1,
+                    "seed": seed + idx,
+                    "enable_safety_checker": True,
+                }
+            )
+
         fal_url = result["images"][0]["url"]
-
-        safe_label = shot['label'].lower().replace(' ','_').replace('/','_')
-        filename = f"char_{char_name.lower().replace(' ','_')}_{idx}_{safe_label}.jpg"
+        filename = _safe_filename(char_name, idx, shot["label"])
         local_path = CHARS_DIR / filename
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.get(fal_url)
-            resp.raise_for_status()
-            local_path.write_bytes(resp.content)
-
-        return {
-            "label": shot["label"],
-            "angle": shot["angle"],
-            "image_url": f"/output/characters/{filename}"
-        }
+        await _save_from_url(fal_url, local_path)
+        return {"label": shot["label"], "angle": shot["angle"],
+                "image_url": f"/output/characters/{filename}"}
     except Exception as e:
         return {"label": shot["label"], "angle": shot["angle"], "image_url": None, "error": str(e)}
 
 
-async def _gen_imagen(full_prompt: str, model: str, seed: int, idx: int, char_name: str, shot: dict) -> dict:
-    """Generate 1 ảnh qua Google Imagen / Gemini Image."""
+async def _gen_imagen(full_prompt: str, model: str, seed: int, idx: int,
+                      char_name: str, shot: dict) -> dict:
     try:
-        api_key = os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            raise ValueError("GOOGLE_API_KEY chưa được cấu hình trong .env")
-
-        client = genai.Client(api_key=api_key)
+        client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
         response = client.models.generate_images(
             model=model,
             prompt=full_prompt,
-            config=gtypes.GenerateImagesConfig(
-                number_of_images=1,
-                aspect_ratio="1:1",
-            )
+            config=gtypes.GenerateImagesConfig(number_of_images=1, aspect_ratio="1:1"),
         )
         img_data = response.generated_images[0].image.image_bytes
-
-        safe_label = shot['label'].lower().replace(' ','_').replace('/','_')
-        filename = f"char_{char_name.lower().replace(' ','_')}_{idx}_{safe_label}.jpg"
-        local_path = CHARS_DIR / filename
-        local_path.write_bytes(img_data)
-
-        return {
-            "label": shot["label"],
-            "angle": shot["angle"],
-            "image_url": f"/output/characters/{filename}"
-        }
+        filename = _safe_filename(char_name, idx, shot["label"])
+        (CHARS_DIR / filename).write_bytes(img_data)
+        return {"label": shot["label"], "angle": shot["angle"],
+                "image_url": f"/output/characters/{filename}"}
     except Exception as e:
         return {"label": shot["label"], "angle": shot["angle"], "image_url": None, "error": str(e)}
 
 
-async def _generate_one_ref(base: str, shot: dict, style: str, seed: int, char_name: str, idx: int,
-                             provider: str = "fal", model: str = "fal-ai/flux/dev") -> dict:
-    """Generate 1 ảnh từ base_prompt + angle shot, chọn provider."""
+async def _generate_one_ref(base: str, shot: dict, style: str, seed: int,
+                             char_name: str, idx: int,
+                             provider: str = "fal", model: str = "fal-ai/flux/dev",
+                             reference_image_url: str = None) -> dict:
     full_prompt = f"{base}, {shot['angle']}, {style}"
-
     if provider == "google":
         return await _gen_imagen(full_prompt, model, seed, idx, char_name, shot)
-    else:
-        return await _gen_fal(full_prompt, model, seed, idx, char_name, shot)
+    return await _gen_fal(full_prompt, model, seed, idx, char_name, shot,
+                          reference_image_url=reference_image_url)
 
 
-@router.post("/character/retry-ref")
-async def retry_character_ref(req: RetryRefRequest):
-    """Retry 1 ảnh lỗi, dùng đúng seed gốc để giữ nhất quán khuôn mặt."""
-    if req.provider == "fal":
-        if not os.getenv("FAL_KEY"):
-            raise HTTPException(500, "FAL_KEY chưa được cấu hình trong .env")
-    elif req.provider == "google":
-        if not os.getenv("GOOGLE_API_KEY"):
-            raise HTTPException(500, "GOOGLE_API_KEY chưa được cấu hình trong .env")
-
-    if req.angle_idx < 0 or req.angle_idx >= len(ANGLE_SHOTS):
-        raise HTTPException(400, f"angle_idx phải từ 0 đến {len(ANGLE_SHOTS)-1}")
-
-    CHARS_DIR.mkdir(parents=True, exist_ok=True)
-    shot = ANGLE_SHOTS[req.angle_idx]
-    result = await _generate_one_ref(
-        req.base_prompt, shot, req.style, req.seed, req.name, req.angle_idx,
-        provider=req.provider, model=req.model
-    )
-    return result
-
+# ─── UPLOAD THỦ CÔNG ────────────────────────────────────────────
 
 @router.post("/character/upload-ref")
 async def upload_character_ref(
@@ -149,45 +142,84 @@ async def upload_character_ref(
     char_name: str = Form(...),
     angle_idx: int = Form(...),
 ):
-    """Upload ảnh thủ công cho 1 slot trong reference sheet."""
     if angle_idx < 0 or angle_idx >= len(ANGLE_SHOTS):
-        raise HTTPException(400, f"angle_idx phải từ 0 đến {len(ANGLE_SHOTS)-1}")
-
+        raise HTTPException(400, f"angle_idx phải từ 0–{len(ANGLE_SHOTS)-1}")
     CHARS_DIR.mkdir(parents=True, exist_ok=True)
     shot = ANGLE_SHOTS[angle_idx]
-    safe_label = shot['label'].lower().replace(' ', '_').replace('/', '_')
     ext = (file.filename or "image.jpg").rsplit(".", 1)[-1].lower()
     if ext not in ("jpg", "jpeg", "png", "webp"):
         ext = "jpg"
-    filename = f"char_{char_name.lower().replace(' ','_')}_{angle_idx}_{safe_label}.{ext}"
-    local_path = CHARS_DIR / filename
-    local_path.write_bytes(await file.read())
+    filename = _safe_filename(char_name, angle_idx, shot["label"], ext)
+    (CHARS_DIR / filename).write_bytes(await file.read())
+    return {"label": shot["label"], "angle": shot["angle"],
+            "image_url": f"/output/characters/{filename}"}
 
-    return {
-        "label": shot["label"],
-        "angle": shot["angle"],
-        "image_url": f"/output/characters/{filename}"
-    }
 
+# ─── GENERATE (ALL hoặc MISSING) ────────────────────────────────
 
 @router.post("/character/generate-refs", response_model=CharacterRefResponse)
 async def generate_character_refs(req: CharacterRefRequest):
-    if req.provider == "fal":
-        fal_key = os.getenv("FAL_KEY")
-        if not fal_key:
-            raise HTTPException(500, "FAL_KEY chưa được cấu hình trong .env")
-    elif req.provider == "google":
-        if not os.getenv("GOOGLE_API_KEY"):
-            raise HTTPException(500, "GOOGLE_API_KEY chưa được cấu hình trong .env")
+    if req.provider == "fal" and not os.getenv("FAL_KEY"):
+        raise HTTPException(500, "FAL_KEY chưa được cấu hình trong .env")
+    if req.provider == "google" and not os.getenv("GOOGLE_API_KEY"):
+        raise HTTPException(500, "GOOGLE_API_KEY chưa được cấu hình trong .env")
 
     CHARS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Generate 6 ảnh song song
-    tasks = [
-        _generate_one_ref(req.base_prompt, shot, req.style, req.seed, req.name, i,
-                          provider=req.provider, model=req.model)
-        for i, shot in enumerate(ANGLE_SHOTS)
-    ]
-    results = await asyncio.gather(*tasks)
+    # Pad existing_refs về đúng 6 slot
+    existing = list(req.existing_refs) + [None] * 6
+    existing = existing[:6]
 
-    return CharacterRefResponse(name=req.name, refs=list(results))
+    # Ảnh reference = ảnh đầu tiên đã có (dùng cho redux nếu có)
+    reference_url = next((url for url in existing if url), None)
+
+    results = []
+    tasks_map = {}  # idx → coroutine
+
+    for i, shot in enumerate(ANGLE_SHOTS):
+        if existing[i]:
+            # Slot đã có ảnh — giữ nguyên
+            results.append({
+                "label": shot["label"],
+                "angle": shot["angle"],
+                "image_url": existing[i],
+            })
+        else:
+            # Slot trống — generate
+            # Nếu có reference → dùng redux (chỉ FAL), không có → gen từ prompt
+            ref_url = reference_url if (req.provider == "fal" and reference_url) else None
+            tasks_map[i] = _generate_one_ref(
+                req.base_prompt, shot, req.style, req.seed, req.name, i,
+                provider=req.provider, model=req.model,
+                reference_image_url=ref_url,
+            )
+            results.append(None)  # placeholder
+
+    # Chạy song song các task cần gen
+    if tasks_map:
+        generated = await asyncio.gather(*tasks_map.values())
+        for idx, result in zip(tasks_map.keys(), generated):
+            results[idx] = result
+
+    return CharacterRefResponse(name=req.name, refs=results)
+
+
+# ─── RETRY 1 ẢNH ────────────────────────────────────────────────
+
+@router.post("/character/retry-ref")
+async def retry_character_ref(req: RetryRefRequest):
+    if req.provider == "fal" and not os.getenv("FAL_KEY"):
+        raise HTTPException(500, "FAL_KEY chưa được cấu hình trong .env")
+    if req.provider == "google" and not os.getenv("GOOGLE_API_KEY"):
+        raise HTTPException(500, "GOOGLE_API_KEY chưa được cấu hình trong .env")
+    if req.angle_idx < 0 or req.angle_idx >= len(ANGLE_SHOTS):
+        raise HTTPException(400, f"angle_idx phải từ 0–{len(ANGLE_SHOTS)-1}")
+
+    CHARS_DIR.mkdir(parents=True, exist_ok=True)
+    shot = ANGLE_SHOTS[req.angle_idx]
+    ref_url = req.reference_image_url if req.provider == "fal" else None
+    return await _generate_one_ref(
+        req.base_prompt, shot, req.style, req.seed, req.name, req.angle_idx,
+        provider=req.provider, model=req.model,
+        reference_image_url=ref_url,
+    )

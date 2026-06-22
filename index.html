@@ -1377,6 +1377,7 @@ async function generateCharacterRefs(idx) {
     // Dùng ảnh đầu làm avatar nếu có
     const firstImg = data.refs.find(r => r.image_url);
     if (firstImg) state.characters[idx].avatarUrl = firstImg.image_url;
+    saveState();
     renderCharacters();
     notify(`✓ Hoàn tất ${data.refs.filter(r=>r.image_url).length}/6 ảnh tham chiếu cho ${c.name}`);
   } catch (err) {

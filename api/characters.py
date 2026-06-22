@@ -3,7 +3,7 @@ import asyncio
 import fal_client
 import httpx
 from pathlib import Path
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from google import genai
 from google.genai import types as gtypes
@@ -141,6 +141,33 @@ async def retry_character_ref(req: RetryRefRequest):
         provider=req.provider, model=req.model
     )
     return result
+
+
+@router.post("/character/upload-ref")
+async def upload_character_ref(
+    file: UploadFile = File(...),
+    char_name: str = Form(...),
+    angle_idx: int = Form(...),
+):
+    """Upload ảnh thủ công cho 1 slot trong reference sheet."""
+    if angle_idx < 0 or angle_idx >= len(ANGLE_SHOTS):
+        raise HTTPException(400, f"angle_idx phải từ 0 đến {len(ANGLE_SHOTS)-1}")
+
+    CHARS_DIR.mkdir(parents=True, exist_ok=True)
+    shot = ANGLE_SHOTS[angle_idx]
+    safe_label = shot['label'].lower().replace(' ', '_').replace('/', '_')
+    ext = (file.filename or "image.jpg").rsplit(".", 1)[-1].lower()
+    if ext not in ("jpg", "jpeg", "png", "webp"):
+        ext = "jpg"
+    filename = f"char_{char_name.lower().replace(' ','_')}_{angle_idx}_{safe_label}.{ext}"
+    local_path = CHARS_DIR / filename
+    local_path.write_bytes(await file.read())
+
+    return {
+        "label": shot["label"],
+        "angle": shot["angle"],
+        "image_url": f"/output/characters/{filename}"
+    }
 
 
 @router.post("/character/generate-refs", response_model=CharacterRefResponse)

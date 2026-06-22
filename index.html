@@ -461,6 +461,18 @@
   .char-model-select:focus { outline: none; border-color: var(--gold-dim); }
   .char-model-select option { background: #1a1a1a; color: #e0e0e0; }
 
+  /* ─── UPLOAD OVERLAY trên ref slot ─────────────────────── */
+  .char-ref-item { position: relative; }
+  .char-ref-upload-btn {
+    display: none;
+    position: absolute; top: 3px; right: 3px;
+    background: rgba(0,0,0,0.7); border: 1px solid var(--gold-dim);
+    color: var(--gold); border-radius: 4px;
+    font-size: 10px; padding: 2px 5px; cursor: pointer; z-index: 2;
+  }
+  .char-ref-item:hover .char-ref-upload-btn { display: block; }
+  .char-ref-upload-btn:hover { background: rgba(201,168,76,0.2); }
+
   .btn-sm {
     padding: 4px 10px;
     border: 1px solid var(--border);
@@ -1298,6 +1310,45 @@ function onCharModelChange(idx) {
   saveState();
 }
 
+function uploadCharacterRef(charIdx, refIdx) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/jpeg,image/png,image/webp';
+  input.onchange = async () => {
+    const file = input.files[0];
+    if (!file) return;
+    const c = state.characters[charIdx];
+
+    state.characters[charIdx].refs[refIdx] = { loading: true };
+    renderCharacters();
+    notify(`⬆ Đang upload ảnh cho ${c.name} slot ${refIdx + 1}...`);
+
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('char_name', c.name);
+      fd.append('angle_idx', refIdx);
+
+      const resp = await fetch('/api/character/upload-ref', { method: 'POST', body: fd });
+      if (!resp.ok) {
+        const err = await resp.json();
+        throw new Error(err.detail || 'Upload failed');
+      }
+      const data = await resp.json();
+      state.characters[charIdx].refs[refIdx] = data;
+      if (data.image_url && !c.avatarUrl) state.characters[charIdx].avatarUrl = data.image_url;
+      saveState();
+      renderCharacters();
+      notify(`✓ Upload thành công ảnh góc "${data.label}"`);
+    } catch (err) {
+      state.characters[charIdx].refs[refIdx] = { label: '', angle: '', image_url: null, error: err.message };
+      renderCharacters();
+      notify('Lỗi upload: ' + err.message);
+    }
+  };
+  input.click();
+}
+
 async function retryCharacterRef(charIdx, refIdx) {
   const c = state.characters[charIdx];
   if (!c.refSeed) { notify('Không tìm thấy seed gốc — hãy Generate lại toàn bộ'); return; }
@@ -1408,10 +1459,14 @@ function renderCharacters() {
     if (c.refs && c.refs.length > 0) {
       refsHtml = `<div class="char-refs">` + c.refs.map((r, ri) => {
         if (r.loading) return `<div class="char-ref-item"><div class="char-ref-placeholder"><div class="spin"></div></div></div>`;
-        if (!r.image_url) return `<div class="char-ref-item"><div class="char-ref-placeholder" style="font-size:9px;color:var(--accent-red);cursor:pointer" title="${r.error||''}" onclick="retryCharacterRef(${i},${ri})">↻<br><span style="font-size:8px">${(r.error||'').substring(0,30)}</span></div></div>`;
+        if (!r.image_url) return `<div class="char-ref-item">
+          <div class="char-ref-placeholder" style="font-size:9px;color:var(--accent-red);cursor:pointer" title="${r.error||''}" onclick="retryCharacterRef(${i},${ri})">↻<br><span style="font-size:8px">${(r.error||'').substring(0,30)}</span></div>
+          <button class="char-ref-upload-btn" style="display:block;position:static;margin-top:4px;width:100%" onclick="uploadCharacterRef(${i},${ri})">⬆ Upload</button>
+        </div>`;
         return `<div class="char-ref-item" onclick="window.open('${r.image_url}','_blank')">
           <img src="${r.image_url}" loading="lazy" />
           <div class="char-ref-label">${r.label}</div>
+          <button class="char-ref-upload-btn" onclick="event.stopPropagation();uploadCharacterRef(${i},${ri})">⬆</button>
         </div>`;
       }).join('') + `</div>`;
     }

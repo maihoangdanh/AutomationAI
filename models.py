@@ -69,6 +69,8 @@ class VideoRequest(BaseModel):
     scene_number: int = 1
     duration_seconds: int = 5
     reference_image_url: Optional[str] = None
+    provider: str = "google"       # "google" | "fal"
+    model: str = "veo-3.0-generate-001"
 
 
 class VideoResponse(BaseModel):

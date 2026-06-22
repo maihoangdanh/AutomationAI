@@ -1201,7 +1201,13 @@
         <div class="panel">
           <div class="panel-header">
             <div class="panel-title"><div class="dot"></div>STORYBOARD TRỰC QUAN</div>
-            <div style="display:flex;gap:6px">
+            <div style="display:flex;gap:6px;align-items:center">
+              <!-- Video model selector -->
+              <select class="char-model-select" id="video-provider-sel" onchange="onVideoProviderChange()" style="width:auto;font-size:10px">
+                <option value="google">Google Veo</option>
+                <option value="fal">FAL.ai Kling</option>
+              </select>
+              <select class="char-model-select" id="video-model-sel" onchange="onVideoModelChange()" style="width:auto;font-size:10px"></select>
               <button class="btn-sm" onclick="cycleGrid()">⊞ Grid</button>
               <button class="btn-sm" onclick="copyAllPrompts()">⧉ Copy All Prompts</button>
             </div>
@@ -1271,7 +1277,9 @@ const state = {
   imageMap: {},
   videoMap: {},
   scriptLibrary: [],  // [{id, name, concept, idea, scenes, createdAt}]
-  product: { name: '', desc: '', imageUrl: null }
+  product: { name: '', desc: '', imageUrl: null },
+  videoProvider: 'google',
+  videoModel: 'veo-3.0-generate-001'
 };
 
 // ─── SCENE LABELS ───────────────────────────────────────────
@@ -2205,10 +2213,57 @@ function copyPrompt(idx) {
   notify('Đã copy AI prompt!');
 }
 
+// ─── VIDEO MODEL SELECTOR ────────────────────────────────────
+const VIDEO_MODELS = {
+  google: [
+    { value: 'veo-3.0-generate-001',      label: 'Veo 3 (~3 phút)' },
+    { value: 'veo-3.0-fast-generate-001', label: 'Veo 3 Fast (~1 phút)' },
+    { value: 'veo-2.0-generate-001',      label: 'Veo 2 (~2 phút)' },
+  ],
+  fal: [
+    { value: 'fal-ai/kling-video/v1.6/pro/text-to-video',      label: 'Kling v1.6 Pro' },
+    { value: 'fal-ai/kling-video/v1.6/standard/text-to-video', label: 'Kling v1.6 Standard' },
+    { value: 'fal-ai/kling-video/v1/pro/text-to-video',        label: 'Kling v1 Pro' },
+  ],
+};
+
+function _renderVideoModelOptions() {
+  const sel = document.getElementById('video-model-sel');
+  if (!sel) return;
+  const list = VIDEO_MODELS[state.videoProvider] || VIDEO_MODELS.google;
+  sel.innerHTML = list.map(m =>
+    `<option value="${m.value}" ${state.videoModel === m.value ? 'selected' : ''}>${m.label}</option>`
+  ).join('');
+}
+
+function onVideoProviderChange() {
+  const sel = document.getElementById('video-provider-sel');
+  state.videoProvider = sel.value;
+  state.videoModel = (VIDEO_MODELS[sel.value] || [])[0]?.value || 'veo-3.0-generate-001';
+  _renderVideoModelOptions();
+  saveState();
+}
+
+function onVideoModelChange() {
+  const sel = document.getElementById('video-model-sel');
+  state.videoModel = sel.value;
+  saveState();
+}
+
+function _initVideoSelectors() {
+  const provSel = document.getElementById('video-provider-sel');
+  if (!provSel) return;
+  provSel.value = state.videoProvider || 'google';
+  _renderVideoModelOptions();
+}
+
 async function generateVideo(sceneIdx) {
   const sc = state.scenes[sceneIdx];
   if (!sc) return;
-  notify(`Đang generate video cảnh ${sc.scene_number}... (~3 phút)`);
+  const provider = state.videoProvider || 'google';
+  const model = state.videoModel || 'veo-3.0-generate-001';
+  const modelLabel = [...(VIDEO_MODELS.google), ...(VIDEO_MODELS.fal)].find(m => m.value === model)?.label || model;
+  notify(`🎬 Đang generate video cảnh ${sc.scene_number} bằng ${modelLabel}...`);
   try {
     const resp = await fetch('/api/video', {
       method: 'POST',
@@ -2217,7 +2272,9 @@ async function generateVideo(sceneIdx) {
         prompt: sc.visual_description,
         aspect_ratio: state.ratio,
         scene_number: sc.scene_number,
-        duration_seconds: Math.min(sc.duration, 8)
+        duration_seconds: Math.min(sc.duration, 8),
+        provider: provider,
+        model: model,
       })
     });
     if (!resp.ok) {
@@ -2340,7 +2397,7 @@ function resetAll() {
 const STORAGE_KEY = 'aistudio_state_v1';
 
 // Những field cần lưu (bỏ qua imageMap/videoMap vì URL /output/ còn phụ thuộc server)
-const PERSIST_FIELDS = ['idea', 'ratio', 'duration', 'style', 'characters', 'scenes', 'imageMap', 'videoMap', 'sbCols', 'scriptLibrary', 'product'];
+const PERSIST_FIELDS = ['idea', 'ratio', 'duration', 'style', 'characters', 'scenes', 'imageMap', 'videoMap', 'sbCols', 'scriptLibrary', 'product', 'videoProvider', 'videoModel'];
 
 function saveState() {
   try {
@@ -2381,6 +2438,7 @@ if (state.idea) {
   document.getElementById('idea-input').value = state.idea;
 }
 renderScriptLibrary();
+_initVideoSelectors();
 // Restore product fields
 if (state.product) {
   if (state.product.name) document.getElementById('product-name').value = state.product.name;
